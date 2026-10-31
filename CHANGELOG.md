@@ -8,6 +8,12 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- Updates weisen auf Neues hin: `install.sh` (also auch `polaris update`)
+  schreibt, was im CHANGELOG seit dem letzten Lauf neu ist, nach
+  `~/.local/state/polaris/neu-seit-update.md` und als offenen Punkt nach
+  `handoff/polaris.md`. Der Agent stellt es dem Nutzer vor; entschieden wird
+  gemeinsam. Geänderte allgemeine Agentenregeln meldet er ebenso, bis der
+  Abgleich quittiert ist.
 - Allgemeine Agentenregeln (`memory/template/AGENTS.md`) neu und vollständiger:
   u. a. ressourcenschonend arbeiten, Sicherungskopien nie unter erratenem
   Namen, knapp schreiben, vor `git push` privat/öffentlich prüfen. Die Vorlage

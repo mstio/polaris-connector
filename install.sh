@@ -377,6 +377,7 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ] && [ ! -e "$MEM" ]; then
     run cp -n "$REPO"/memory/template/AGENTS.md "$REPO"/memory/template/AI_HANDOFF.md \
       "$REPO"/memory/template/entrypoints.conf "$MEM/"
     say "  aus der Vorlage angelegt - AGENTS.md und AI_HANDOFF.md an den Rechner anpassen"
+    AGENTS_FROM_TEMPLATE=1
   fi
   # Werkzeug und Agenten-Einstiege sofort: sonst lesen Claude Code, Codex usw.
   # nach einem fruehen Abbruch die Regeln gar nicht (memlint braucht nur python3).
@@ -627,6 +628,43 @@ if [ -d "$HOME/.config/omarchy-backup/paths.d" ]; then
   fi
 fi
 
+# Neu seit dem letzten Update (seit 2026-10-31): Was der CHANGELOG seit dem
+# zuletzt gesehenen Stand neu hat, kommt nach ~/.local/state/polaris/neu-seit-update.md
+# und als offener Punkt nach handoff/polaris.md. Der Agent stellt es dem
+# Nutzer vor; entschieden wird gemeinsam. Funktioniert ohne git (Paket) und
+# unabhaengig davon, welches update.sh den Lauf gestartet hat.
+NEWS="$HOME/.local/state/polaris/neu-seit-update.md" SEEN="$HOME/.local/state/polaris/changelog-gesehen.md"
+if [ -f "$REPO/CHANGELOG.md" ] && [ "$DRY" = 0 ]; then
+  mkdir -p "$(dirname "$NEWS")"
+  if [ -f "$SEEN" ]; then
+    news="$(diff --changed-group-format='%>' --unchanged-group-format='' "$SEEN" "$REPO/CHANGELOG.md" || true)"
+  elif [ "$(ls -1 "$HOME"/.local/state/polaris/install-*.log 2>/dev/null | wc -l)" -le 1 ]; then
+    news=""  # Neuinstallation (nur das Protokoll dieses Laufs): nichts zu vergleichen
+  else
+    # Erstes Update mit dieser Funktion: der oberste Abschnitt (meist "Unveroeffentlicht").
+    news="$(awk '/^## /{n++} n==1' "$REPO/CHANGELOG.md")"
+  fi
+  if [ -n "$(printf '%s' "$news" | tr -d '[:space:]')" ]; then
+    {
+      [ -s "$NEWS" ] || printf '# Neu seit dem letzten Polaris-Update
+
+Für Agenten: Jeden Punkt dem Nutzer kurz vorstellen (was neu ist, was es ihm bringt, ob etwas einzustellen wäre) und gemeinsam entscheiden. Nichts ungefragt aktivieren oder umstellen. Danach diese Datei löschen.
+'
+      printf '
+## Update vom %s
+
+%s
+' "$(date '+%Y-%m-%d %H:%M')" "$news"
+    } >> "$NEWS"
+  fi
+  cp -- "$REPO/CHANGELOG.md" "$SEEN"
+  if [ -s "$NEWS" ]; then
+    step "Neu seit dem letzten Update"
+    sed -n '/^## Update vom/,$p' "$NEWS" | head -40 | sed 's/^/  /'
+    warn "Neuerungen seit dem letzten Update in $(tilde "$NEWS"): mit dem Nutzer durchgehen und gemeinsam entscheiden, was eingestellt oder übernommen wird; danach die Datei löschen."
+  fi
+fi
+
 # Maschinengedaechtnis: nur Werkzeug und leere Vorlage (memory/), nie Inhalte.
 # Angelegt bzw. aus dem Spiegel geholt wird es schon zu Beginn (siehe oben).
 if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ]; then
@@ -667,6 +705,24 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ]; then
       printf '# Von Polaris install.sh angelegt: Maschinengedaechtnis\ninclude ~/.config/ai-agents\n' \
         > "$HOME/.config/omarchy-backup/paths.d/ai-agents.conf"
       say "  include ~/.config/ai-agents eingetragen (paths.d/ai-agents.conf)"
+    fi
+  fi
+  # Neue allgemeine Agentenregeln (seit 2026-10-31): Ein vorhandenes AGENTS.md
+  # wird nie ueberschrieben. Ist die Vorlage neuer als der letzte quittierte
+  # Abgleich, steht das als offener Punkt in handoff/polaris.md, bis ein Agent
+  # abgeglichen und quittiert hat. Auf dem Rechner, aus dessen AGENTS.md die
+  # Vorlage erzeugt wird (agents-template.py --check ok), entfaellt das.
+  tmpl="$REPO/memory/template/AGENTS.md" ack="$HOME/.local/state/polaris/agents-template.ack"
+  if [ -f "$tmpl" ] && [ -f "$MEM/AGENTS.md" ] && [ "$DRY" = 0 ]; then
+    tmpl_sum="$(sha256sum "$tmpl" | cut -d' ' -f1)"
+    if [ "${AGENTS_FROM_TEMPLATE:-0}" = 1 ]; then
+      mkdir -p "$(dirname "$ack")" && printf '%s\n' "$tmpl_sum" > "$ack"
+    elif [ "$(cat "$ack" 2>/dev/null)" = "$tmpl_sum" ]; then
+      say "  Agentenregeln: abgeglichen"
+    elif [ -f "$REPO/scripts/agents-template.py" ] && python3 "$REPO/scripts/agents-template.py" --check >/dev/null 2>&1; then
+      say "  Agentenregeln: Vorlage stammt aus diesem AGENTS.md"
+    else
+      warn "Allgemeine Agentenregeln haben sich geändert: $(tilde "$tmpl") mit ~/.config/ai-agents/AGENTS.md vergleichen, dem Nutzer die neuen oder geänderten Regeln mit ihrem Nutzen vorstellen und gemeinsam entscheiden, was übernommen wird (nichts ungefragt, eigene Regeln bleiben). Danach quittieren: sha256sum $(tilde "$tmpl") | cut -d' ' -f1 > $(tilde "$ack")"
     fi
   fi
   if [ "$DRY" = 1 ]; then run python3 "$MEM/tools/memlint.py" --link
