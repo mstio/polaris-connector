@@ -8,6 +8,12 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- Allgemeine Agentenregeln (`memory/template/AGENTS.md`) neu und vollständiger:
+  u. a. ressourcenschonend arbeiten, Sicherungskopien nie unter erratenem
+  Namen, knapp schreiben, vor `git push` privat/öffentlich prüfen. Die Vorlage
+  wird aus den als „allgemein“ gekennzeichneten Abschnitten erzeugt
+  (`scripts/agents-template.py`). Ein vorhandenes `~/.config/ai-agents/AGENTS.md`
+  ändert `install.sh` nicht; Neues bei Bedarf von Hand übernehmen.
 - Der Health Check überwacht nur die in `curator.yaml` unter
   `monitoring.chat_sources` ausgewählten Browser-Chatquellen (`chatgpt`,
   `claude` oder keine). Die Curator-Runtime bleibt davon unabhängig.

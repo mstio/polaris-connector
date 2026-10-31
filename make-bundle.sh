@@ -42,6 +42,12 @@ for sk in memory/template/skills/*/; do
     exit 1
   fi
 done
+# Allgemeine Agentenregeln: Vorlage aus den als "allgemein" gekennzeichneten
+# Abschnitten der Live-AGENTS.md (seit 2026-10-31, scripts/agents-template.py).
+if ! python3 scripts/agents-template.py --check; then
+  echo "FEHLER: memory/template/AGENTS.md passt nicht zur Live-AGENTS.md (siehe Diff oben)." >&2
+  exit 1
+fi
 
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
