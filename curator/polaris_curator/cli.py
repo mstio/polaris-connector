@@ -124,7 +124,8 @@ def cmd_status_all(args: argparse.Namespace) -> int:
 
     cfg = config_mod.load_config()
     sources = getattr(cfg, "chat_sources", ("chatgpt", "claude"))
-    health = health_mod.collect(projects, getattr(cfg, "max_days_without_chatgpt", 3), chat_sources=sources)
+    health = health_mod.collect(projects, getattr(cfg, "max_days_without_chatgpt", 3), chat_sources=sources,
+                                sources_explicit=getattr(cfg, "chat_sources_explicit", True))
     health["warnings"][:0] = list(getattr(cfg, "config_problems", ()))
     result = {
         "schema_version": 1,
@@ -362,7 +363,8 @@ def cmd_run_all(args: argparse.Namespace) -> int:
 
     cfg = config_mod.load_config()
     sources = getattr(cfg, "chat_sources", ("chatgpt", "claude"))
-    health = health_mod.collect(projects, getattr(cfg, "max_days_without_chatgpt", 3), chat_sources=sources)
+    health = health_mod.collect(projects, getattr(cfg, "max_days_without_chatgpt", 3), chat_sources=sources,
+                                sources_explicit=getattr(cfg, "chat_sources_explicit", True))
     health["warnings"][:0] = list(getattr(cfg, "config_problems", ()))
     for r in reports:
         for w in r["report"].get("warnings") or []:

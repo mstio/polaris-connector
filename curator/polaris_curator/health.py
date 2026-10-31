@@ -178,8 +178,14 @@ def _stuck_retries(now: datetime) -> list[tuple[str, str]]:
     return out
 
 
+# Ohne ausdrueckliche Quellenliste weiss ein Agent sonst nicht, dass der
+# ChatGPT-Alarm auf Claude-only-Systemen per Konfiguration verschwindet.
+SOURCES_HINT = ("Falls ChatGPT hier nicht genutzt wird: in ~/.config/polaris/curator.yaml "
+                "monitoring.chat_sources setzen, z. B. [claude] (siehe CHANGELOG).")
+
+
 def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datetime | None = None,
-            chat_sources: tuple[str, ...] = ("chatgpt", "claude")) -> dict:
+            chat_sources: tuple[str, ...] = ("chatgpt", "claude"), sources_explicit: bool = True) -> dict:
     now = now or datetime.now(timezone.utc)
     per_project: dict[str, str | None] = {}
     latest = None
@@ -195,14 +201,15 @@ def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datet
     # 0 schaltet nur die Zeitpruefung aus, nicht die Quelle oder Bridge-Fehler.
     if projects and "chatgpt" in chat_sources and max_days_without_chatgpt > 0:
         if latest is None:
-            warnings.append("Noch keine ChatGPT-Nachricht archiviert.")
+            warnings.append("Noch keine ChatGPT-Nachricht archiviert."
+                            + ("" if sources_explicit else " " + SOURCES_HINT))
         else:
             days_since = (now.timestamp() - latest) / 86400
             if days_since > max_days_without_chatgpt:
                 warnings.append(
                     f"Seit {int(days_since)} Tagen keine ChatGPT-Nachricht mehr archiviert "
                     f"(in keinem Projekt) - Firefox-Erweiterung, Berechtigung für chatgpt.com "
-                    f"und Native Host prüfen."
+                    f"und Native Host prüfen." + ("" if sources_explicit else " " + SOURCES_HINT)
                 )
 
     inbox_stale = 0

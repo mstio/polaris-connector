@@ -53,6 +53,17 @@ class TestHealth(unittest.TestCase):
             h = health.collect({"a": a}, 3)
             self.assertIn("Noch keine ChatGPT-Nachricht archiviert.", h["warnings"])
 
+    def test_hint_on_chat_sources_only_without_explicit_list(self):
+        with TempProject() as a:
+            implicit = health.collect({"a": a}, 3, sources_explicit=False)["warnings"]
+            self.assertTrue(any("monitoring.chat_sources" in w for w in implicit))
+            explicit = health.collect({"a": a}, 3)["warnings"]
+            self.assertFalse(any("monitoring.chat_sources" in w for w in explicit))
+        with TempProject() as b:
+            _age(self._msg(b, "m1"), 20)
+            stale = health.collect({"b": b}, 3, sources_explicit=False)["warnings"]
+            self.assertTrue(any("Seit 20 Tagen" in w and "chat_sources" in w for w in stale))
+
     def test_zero_days_disables_chatgpt_check(self):
         with TempProject() as a, TempProject() as b:
             self.assertEqual(health.collect({"a": a}, 0)["warnings"], [])

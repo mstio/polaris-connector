@@ -75,8 +75,8 @@ def _fmt_age(days: float | None) -> str:
     return f"vor {int(days)} Tag(en)"
 
 
-def check_archive(projects: dict, max_days: int) -> dict:
-    h = archive_health.collect(projects, max_days, chat_sources=("chatgpt",))
+def check_archive(projects: dict, max_days: int, sources_explicit: bool = True) -> dict:
+    h = archive_health.collect(projects, max_days, chat_sources=("chatgpt",), sources_explicit=sources_explicit)
     if h["warnings"]:
         level = "error" if any("keine ChatGPT-Nachricht" in w for w in h["warnings"]) else "warn"
         return _c("chatgpt-archive", "ChatGPT-Archivierung", level, " ".join(h["warnings"]))
@@ -781,7 +781,7 @@ def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_clau
     claude_required = sources_explicit and "claude" in chat_sources
     checks = [
         check_config(config_problems),
-        check_archive(projects, max_days_without_chatgpt) if "chatgpt" in chat_sources else None,
+        check_archive(projects, max_days_without_chatgpt, sources_explicit) if "chatgpt" in chat_sources else None,
         check_bridge_without_chatgpt(projects) if chat_sources and "chatgpt" not in chat_sources else None,
         check_claude_archive(projects, max_days_without_claude, now, claude_required)
         if "claude" in chat_sources else None,

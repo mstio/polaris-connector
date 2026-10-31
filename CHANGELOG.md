@@ -23,6 +23,9 @@ verlangen. Einzelheiten stehen in der README.
 - Groß-/Kleinschreibung in `chat_sources` ist egal. Unbekannte Einträge (z. B.
   `grok`) brechen nichts mehr ab, sondern erscheinen als rote Zeile
   „Chatquellen-Konfiguration“ im Health Check und als Warnung im Curator-Lauf.
+- Ohne `chat_sources`-Angabe nennen die ChatGPT-Warnungen den Ausweg
+  (`monitoring.chat_sources` setzen); der Agenten-Leitfaden beschreibt die
+  Liste ebenfalls.
 - Ältere Firefox-Erweiterungen vor 0.2.0 melden bei aktiver Claude-Quelle jetzt
   rot („unterstützt Claude-Erfassung noch nicht“); bitte aktualisieren.
 - Der Installer fragt bei neuen Konfigurationen nach den Chatquellen
