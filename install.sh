@@ -5,6 +5,7 @@
 #
 #   ./install.sh                 gefuehrte Einrichtung (fragt nach, bestaetigen)
 #   ./install.sh [--yes] [--dry-run] [--projects <Ordner>] [--runtime codex|claude|command]
+#                [--chat-sources both|chatgpt|claude|none]
 #                [--no-units] [--no-widget] [--no-dock] [--no-restart] [--no-backup] [--no-memory]
 #                [--backup-target <Ordner>] [--memory-mirror <Ordner>]
 #
@@ -17,6 +18,8 @@
 #                codex, claude oder command (beliebige Agenten-CLI, Vorlage
 #                curator/curator.example-command.yaml anpassen). Standard:
 #                codex, falls installiert, sonst claude
+#   --chat-sources  Browser-Chats fuer eine NEU anzulegende curator.yaml;
+#                unabhaengig von der Curator-Runtime. Ohne Option gilt die Vorlage.
 #   --no-units   systemd-Units nicht installieren/aktivieren
 #   --no-widget  Omarchy-Bar-Widgets nicht installieren (Health Check, Backup,
 #                Agenten-Starter)
@@ -56,13 +59,14 @@ PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 BACKUP_DIR="$HOME/.local/share/polaris/install-backups/$(date +%Y%m%d-%H%M%S)"
 
 ORIG_ARGS=("$@")  # fuer den Neustart aus dem App-Ordner (die Schleife verbraucht "$@")
-DRY=0 PROJECTS="" RUNTIME="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR=""
+DRY=0 PROJECTS="" RUNTIME="" CHAT_SOURCES="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR=""
 GUIDED=0; [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ] && GUIDED=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
     --projects) PROJECTS="${2:?--projects braucht einen Ordner}"; shift ;;
     --runtime) RUNTIME="${2:?--runtime braucht codex|claude|command}"; shift ;;
+    --chat-sources) CHAT_SOURCES="${2:?--chat-sources braucht both|chatgpt|claude|none}"; shift ;;
     --no-units) UNITS=0 ;;
     --no-widget) WIDGET=0 ;;
     --no-dock) DOCK=0 ;;
@@ -79,6 +83,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 case "$RUNTIME" in ""|codex|claude|command) ;; *) echo "--runtime: codex, claude oder command" >&2; exit 2 ;; esac
+case "$CHAT_SOURCES" in ""|both|chatgpt|claude|none) ;; *) echo "--chat-sources: both, chatgpt, claude oder none" >&2; exit 2 ;; esac
 
 # Aus einem Installationspaket (make-bundle.sh, ohne .git) gestartet: Die
 # Programmdateien kommen an einen festen Ort, damit Befehle, Units und Native
@@ -218,6 +223,13 @@ TXT
     ask "   Runtime" "$def_rt"; RUNTIME="$REPLY"
     case "$RUNTIME" in codex|claude|command) break ;; *) say "   bitte codex, claude oder command" ;; esac
   done
+  if [ ! -f "$POLARIS_CFG/curator.yaml" ]; then
+    say "   Welche Browser-Chats werden erfasst? Unabhaengig vom Curator-Modell."
+    while :; do
+      ask "   Chatquellen (both/chatgpt/claude/none)" "both"; CHAT_SOURCES="$REPLY"
+      case "$CHAT_SOURCES" in both|chatgpt|claude|none) break ;; *) say "   bitte both, chatgpt, claude oder none" ;; esac
+    done
+  fi
   # 3. Hintergrunddienste und Widgets
   say ""
   ask_yn "3) Hintergrunddienste einrichten (Bridge alle 10 min, Curator nachts)?" j && UNITS=1 || UNITS=0
@@ -259,6 +271,7 @@ TXT
   say "Zusammenfassung"
   say "  Projektordner:       $(tilde "${PROJECTS:-(spaeter)}")"
   say "  Curator-Modell:      $RUNTIME (nur fuer eine neue curator.yaml)"
+  say "  Browser-Chatquellen: ${CHAT_SOURCES:-aus Vorlage} (nur fuer eine neue curator.yaml)"
   say "  Hintergrunddienste:  $([ "$UNITS" = 1 ] && echo ja || echo nein)"
   say "  Widgets:             $([ "$WIDGET" = 1 ] && echo ja || echo nein)"
   say "  Dock (omadock):      $([ "$DOCK" = 1 ] && echo ja || echo nein)"
@@ -269,6 +282,11 @@ TXT
   say ""
   ask_yn "Jetzt einrichten?" j || { say "Abgebrochen, nichts eingerichtet."; exit 0; }
   say ""
+fi
+
+if [ -n "$CHAT_SOURCES" ] && [ -f "$POLARIS_CFG/curator.yaml" ]; then
+  echo "--chat-sources gilt nur bei neuer curator.yaml; vorhandene Datei gezielt bearbeiten" >&2
+  exit 2
 fi
 
 # --- Protokoll und Spur fuer Agenten (seit 2026-10-08) -----------------------
@@ -284,7 +302,7 @@ if [ "$DRY" = 0 ]; then
   exec > >(tee -a "$LOG") 2>&1
   say "INSTALL: $(date -Iseconds) Protokoll $LOG"
   say "INSTALL: Optionen ${ORIG_ARGS[*]:-(gefuehrt)}"
-  say "INSTALL: Auswahl projects=${PROJECTS:-} runtime=${RUNTIME:-auto} units=$UNITS widget=$WIDGET dock=$DOCK backup=$OBACKUP backup_target=${OB_TARGET:-} memory=$MEMORY memory_mirror=${MIRROR:-}"
+  say "INSTALL: Auswahl projects=${PROJECTS:-} runtime=${RUNTIME:-auto} chat_sources=${CHAT_SOURCES:-template} units=$UNITS widget=$WIDGET dock=$DOCK backup=$OBACKUP backup_target=${OB_TARGET:-} memory=$MEMORY memory_mirror=${MIRROR:-}"
 fi
 
 memory_note() {  # memory_note <Status>: Polaris-Eintrag im Maschinengedaechtnis
@@ -434,15 +452,43 @@ else
   tmpl="$REPO/curator/curator.example-$RUNTIME.yaml"
   run mkdir -p "$POLARIS_CFG"
   run cp "$tmpl" "$POLARIS_CFG/curator.yaml"
+  if [ -n "$CHAT_SOURCES" ]; then
+    case "$CHAT_SOURCES" in
+      both) source_list='[chatgpt, claude]' ;;
+      chatgpt) source_list='[chatgpt]' ;;
+      claude) source_list='[claude]' ;;
+      none) source_list='[]' ;;
+    esac
+    run sed -i "s/^  chat_sources: .*/  chat_sources: $source_list/" "$POLARIS_CFG/curator.yaml"
+  fi
   say "  angelegt aus $(basename "$tmpl")"
+fi
+
+CAPTURE_ENABLED=1
+if [ -f "$POLARIS_CFG/curator.yaml" ]; then
+  CAPTURE_ENABLED="$(python3 - "$POLARIS_CFG/curator.yaml" <<'PY'
+import sys
+import yaml
+with open(sys.argv[1], encoding="utf-8") as f:
+    settings = yaml.safe_load(f) or {}
+sources = (settings.get("monitoring") or {}).get("chat_sources", ["chatgpt", "claude"])
+# Wie config._parse_chat_sources: keine Liste -> beide; Unbekanntes zaehlt nicht.
+if not isinstance(sources, list):
+    sources = ["chatgpt", "claude"]
+print(1 if any(str(s).strip().lower() in ("chatgpt", "claude") for s in sources) else 0)
+PY
+)"
+elif [ "$CHAT_SOURCES" = none ] || { [ -z "$CHAT_SOURCES" ] && [ "$RUNTIME" = command ]; }; then
+  CAPTURE_ENABLED=0  # dry-run: die noch nicht angelegte Vorlage haette keine Chatquellen
 fi
 
 if [ "$UNITS" = 1 ]; then
   step "systemd-Units ($UNIT_DIR)"
   run mkdir -p "$UNIT_DIR"
   changed=0
-  for src in "$REPO"/systemd/polaris-bridge.{path,service,timer} "$REPO"/curator/systemd/polaris-curator.{service,timer} \
-             "$REPO"/systemd/polaris-memory-mirror.{service,timer}; do
+  unit_sources=("$REPO"/curator/systemd/polaris-curator.{service,timer} "$REPO"/systemd/polaris-memory-mirror.{service,timer})
+  [ "$CAPTURE_ENABLED" = 0 ] || unit_sources+=("$REPO"/systemd/polaris-bridge.{path,service,timer})
+  for src in "${unit_sources[@]}"; do
     dst="$UNIT_DIR/$(basename "$src")"
     if cmp -s "$src" "$dst"; then say "  $(basename "$src"): ok"; continue; fi
     [ -e "$dst" ] && backup "$dst"
@@ -456,7 +502,9 @@ if [ "$UNITS" = 1 ]; then
     STORAGE_UNIT="$(sed -n 's/^Wants=//p' "$UNIT_DIR/polaris-curator.service.d/$dropin_name" 2>/dev/null | head -1 || true)"
     [ -z "$STORAGE_UNIT" ] && systemctl --user cat rclone-projekte.service >/dev/null 2>&1 && STORAGE_UNIT=rclone-projekte.service
   fi
-  for u in polaris-bridge polaris-curator polaris-memory-mirror; do
+  services=(polaris-curator polaris-memory-mirror)
+  [ "$CAPTURE_ENABLED" = 0 ] || services+=(polaris-bridge)
+  for u in "${services[@]}"; do
     d="$UNIT_DIR/$u.service.d" f="$UNIT_DIR/$u.service.d/$dropin_name"
     if [ -z "$STORAGE_UNIT" ] || [ "$STORAGE_UNIT" = none ]; then
       [ -e "$f" ] && { backup "$f"; run rm -f -- "$f"; changed=1; say "  $u: ohne Laufwerks-Dienst"; }
@@ -471,7 +519,17 @@ if [ "$UNITS" = 1 ]; then
     changed=1
   done
   [ "$changed" = 1 ] && run systemctl --user daemon-reload
-  for u in polaris-bridge.path polaris-bridge.timer polaris-curator.timer polaris-memory-mirror.timer; do
+  if [ "$CAPTURE_ENABLED" = 0 ]; then
+    for u in polaris-bridge.path polaris-bridge.timer; do
+      if [ "$(systemctl --user is-enabled "$u" 2>/dev/null)" = enabled ]; then
+        run systemctl --user disable --now "$u"
+        say "  $u: deaktiviert (keine Browser-Chatquelle)"
+      fi
+    done
+  fi
+  timers=(polaris-curator.timer polaris-memory-mirror.timer)
+  [ "$CAPTURE_ENABLED" = 0 ] || timers+=(polaris-bridge.path polaris-bridge.timer)
+  for u in "${timers[@]}"; do
     if [ "$(systemctl --user is-enabled "$u" 2>/dev/null)" = enabled ] && systemctl --user is-active -q "$u"; then
       say "  $u: aktiv"
     else
@@ -481,12 +539,14 @@ if [ "$UNITS" = 1 ]; then
   done
 fi
 
-step "Firefox Native Host"
-if [ -d "$HOME/.mozilla" ] || [ -d "$HOME/.config/mozilla/firefox" ]; then
-  if [ "$DRY" = 1 ]; then run "$REPO/bridge/install-native-host.sh"
-  else "$REPO/bridge/install-native-host.sh" | sed 's/^/  /'; fi
-else
-  warn "Firefox-Profil fehlt: Firefox einmal starten, dann ./install.sh erneut ausfuehren (die Erweiterung gibt es nur fuer Firefox)"
+if [ "$CAPTURE_ENABLED" = 1 ]; then
+  step "Firefox Native Host"
+  if [ -d "$HOME/.mozilla" ] || [ -d "$HOME/.config/mozilla/firefox" ]; then
+    if [ "$DRY" = 1 ]; then run "$REPO/bridge/install-native-host.sh"
+    else "$REPO/bridge/install-native-host.sh" | sed 's/^/  /'; fi
+  else
+    warn "Firefox-Profil fehlt: Firefox einmal starten, dann ./install.sh erneut ausfuehren (die Erweiterung gibt es nur fuer Firefox)"
+  fi
 fi
 
 if [ "$WIDGET" = 1 ]; then
@@ -645,14 +705,16 @@ if [ "$SHELL_RESTART" = 1 ] && [ "$DRY" = 0 ]; then
 fi
 XPI="$(ls -1 "$REPO"/dist/*-signed.xpi 2>/dev/null | sort -V | tail -n 1 || true)"  # im oeffentlichen Spiegel gibt es keine .xpi
 say "Naechste Schritte (falls noch nicht erledigt):"
-if [ -n "$XPI" ]; then
-  say "  1. Firefox-Erweiterung: firefox '$XPI'"
-  say "     danach in about:addons 'Zugriff auf chatgpt.com/claude.ai' erlauben"
-else
-  say "  1. Firefox-Erweiterung installieren und 'Zugriff auf chatgpt.com/claude.ai' erlauben (README)"
+if [ "$CAPTURE_ENABLED" = 1 ]; then
+  if [ -n "$XPI" ]; then
+    say "  - Firefox-Erweiterung: firefox '$XPI'"
+    say "    danach in about:addons Zugriff auf die konfigurierten Chatquellen erlauben"
+  else
+    say "  - Firefox-Erweiterung installieren und Zugriff auf die konfigurierten Chatquellen erlauben (README)"
+  fi
 fi
-say "  2. polaris roots add <Ordner>          # wo die Projektordner liegen"
-say "  3. polaris-curator llm-check --call    # Anmeldung und Modell pruefen"
+say "  - polaris roots add <Ordner>          # wo die Projektordner liegen"
+say "  - polaris-curator llm-check --call    # Anmeldung und Modell pruefen"
 say "  Fuer AI-Agenten auf diesem Rechner: $(tilde "$GUIDE")"
 [ -d "$REPO/extras/omarchy-backup" ] \
   || say "  Optional: omarchy-backup (eigenes Repo) fuer Snapshots; der Health Check meldet es sonst als 'nicht eingerichtet'."

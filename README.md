@@ -33,12 +33,20 @@ No-op) und installiert nichts aus dem Netz: Symlinks `~/.local/bin/polaris`
 und `polaris-curator`, Bridge-Konfiguration und `project_roots`, eine
 `curator.yaml` aus `curator/curator.example-{codex,claude}.yaml` (nur wenn
 keine existiert; Runtime `codex`, wenn installiert, sonst `claude`, oder
-`--runtime`), die systemd-Units (Bridge-Path/-Timer, Curator-Timer), den
+`--runtime`; Chatquellen mit `--chat-sources both|chatgpt|claude|none`),
+die systemd-Units (Bridge-Path/-Timer, Curator-Timer), den
 Firefox-Native-Host und das Omarchy-Widget. Ersetzte Dateien sichert es nach
 `~/.local/share/polaris/install-backups/<Zeit>/`. Voraussetzungen: `python3`
 mit PyYAML (`python-yaml`), fuer das Widget `jq`, fuer den Curator `codex`
 oder `claude` (angemeldet), fuer die Erweiterung Firefox. Die Erweiterung
 selbst wird von Hand installiert (siehe „Extension installieren“).
+In `~/.config/polaris/curator.yaml` legt `monitoring.chat_sources` fest,
+welche Browser-Chats der Health Check überwacht: `[chatgpt, claude]`,
+`[chatgpt]`, `[claude]` oder `[]`. Die Liste ist unabhängig von der Modell-
+Runtime. Bei `[]` kann der Curator mit `runtime: command` weiterhin ein
+anderes Modell nutzen und Dokumente aus der Inbox verarbeiten; die Firefox-
+Erweiterung wird dann nicht als fehlend gemeldet. Grok-Chats selbst werden
+derzeit nicht erfasst.
 Aus einem git-Checkout sind omarchy-backup und das Maschinengedaechtnis
 (`~/.config/ai-agents`) optional; der Health Check zeigt sie dann als „nicht
 eingerichtet“. Das Installationspaket bringt beide mit (siehe unten).

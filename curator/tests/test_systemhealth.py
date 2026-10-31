@@ -22,9 +22,9 @@ class TestExtensionCheck(unittest.TestCase):
                 {sh.EXTENSION_ID: {"permissions": [], "origins": granted, "data_collection": []}}))
         return d.parent
 
-    def _check(self, addon, granted=None):
+    def _check(self, addon, granted=None, sources=("chatgpt", "claude")):
         with patch.object(sh, "FIREFOX_DIR", self._profile(addon, granted)):
-            return sh.check_extension()
+            return sh.check_extension(sources)
 
     def base(self, **kw):
         a = {"id": sh.EXTENSION_ID, "version": "0.1.2", "active": True, "visible": True,
@@ -33,7 +33,7 @@ class TestExtensionCheck(unittest.TestCase):
         return a
 
     def test_ok(self):
-        self.assertEqual(self._check(self.base())["level"], "ok")
+        self.assertEqual(self._check(self.base(), sources=("chatgpt",))["level"], "ok")
 
     def test_missing_permission_is_error(self):
         c = self._check(self.base(userPermissions={"origins": []}))
@@ -107,7 +107,74 @@ class TestBackupCheck(unittest.TestCase):
         self.assertEqual(self._check([self._snap(0.5)], result="exit-code")["level"], "warn")
 
 
+class TestChatgptArchive(unittest.TestCase):
+    def test_without_chatgpt_message_is_neutral_when_check_is_off(self):
+        with tempfile.TemporaryDirectory() as t:
+            c = sh.check_archive({"a": Path(t)}, 0)
+            self.assertEqual(c["level"], "ok")
+            self.assertIn("noch keine", c["detail"])
+
+    def test_claude_only_needs_only_claude_permission(self):
+        extension = TestExtensionCheck()
+        addon = extension.base(version="0.4.4", userPermissions={"origins": ["https://claude.ai/*"]})
+        self.assertEqual(extension._check(addon)["level"], "error")
+        with patch.object(sh, "FIREFOX_DIR", extension._profile(addon)):
+            self.assertEqual(sh.check_extension(("claude",))["level"], "ok")
+
+    def test_chatgpt_only_needs_only_chatgpt_permission(self):
+        extension = TestExtensionCheck()
+        addon = extension.base(version="0.4.4", userPermissions={"origins": ["https://chatgpt.com/*"]})
+        with patch.object(sh, "FIREFOX_DIR", extension._profile(addon)):
+            self.assertEqual(sh.check_extension(("chatgpt",))["level"], "ok")
+
+    def test_missing_claude_permission_is_error_only_when_required(self):
+        extension = TestExtensionCheck()
+        addon = extension.base(version="0.4.4", userPermissions={"origins": ["https://chatgpt.com/*"]})
+        with patch.object(sh, "FIREFOX_DIR", extension._profile(addon)):
+            self.assertEqual(sh.check_extension(("chatgpt", "claude"))["level"], "warn")
+            self.assertEqual(sh.check_extension(("chatgpt", "claude"), claude_required=True)["level"], "error")
+
+    def test_config_problem_is_shown_as_error(self):
+        self.assertIsNone(sh.check_config(()))
+        c = sh.check_config(("curator.yaml: nicht unterstützte Chatquelle(n) grok ignoriert",))
+        self.assertEqual(c["level"], "error")
+        self.assertIn("grok", c["detail"])
+
+    def test_bridge_warnings_remain_visible_without_chatgpt(self):
+        with patch.object(sh.archive_health, "collect", return_value={"warnings": ["Bridge-Fehler"]}):
+            self.assertEqual(sh.check_bridge_without_chatgpt({})["level"], "warn")
+
+    def test_no_chat_sources_omits_browser_checks(self):
+        optional = ("check_separation", "check_journals", "check_curation",
+                    "check_curator_timer", "check_llm", "check_backup", "check_mount",
+                    "check_memory", "check_widget", "check_update")
+        patches = [patch.object(sh, name, return_value=None) for name in optional]
+        patches += [patch.object(sh, "check_system", return_value=[]),
+                    patch.object(sh, "check_archive"), patch.object(sh, "check_claude_archive"),
+                    patch.object(sh, "check_extension"), patch.object(sh, "check_native_host")]
+        mocks = [p.start() for p in patches]
+        try:
+            report = sh.collect({}, 3, 7, ())
+            self.assertEqual(report["checks"], [])
+            for check in mocks[-4:]:
+                check.assert_not_called()
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+
 class TestClaudeArchive(unittest.TestCase):
+    def test_never_any_message_depends_on_explicit_configuration(self):
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as t:
+            projects = {"a": Path(t)}
+            self.assertEqual(sh.check_claude_archive(projects, 7, now)["level"], "ok")
+            c = sh.check_claude_archive(projects, 7, now, required=True)
+            self.assertEqual(c["level"], "error")
+            self.assertIn("chat_sources", c["detail"])
+            # Ohne Projekte gibt es nichts zu erwarten.
+            self.assertEqual(sh.check_claude_archive({}, 7, now, required=True)["level"], "ok")
+
     def test_levels(self):
         import time
         now = datetime.now(timezone.utc)

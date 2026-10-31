@@ -178,19 +178,22 @@ def _stuck_retries(now: datetime) -> list[tuple[str, str]]:
     return out
 
 
-def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datetime | None = None) -> dict:
+def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datetime | None = None,
+            chat_sources: tuple[str, ...] = ("chatgpt", "claude")) -> dict:
     now = now or datetime.now(timezone.utc)
     per_project: dict[str, str | None] = {}
     latest = None
-    for path in sorted({p.resolve() for p in projects.values()}):
-        m = _latest_mtime(layout.messages_dir(path))
-        per_project[path.name] = _iso(m)
-        if m is not None and (latest is None or m > latest):
-            latest = m
+    if "chatgpt" in chat_sources:
+        for path in sorted({p.resolve() for p in projects.values()}):
+            m = _latest_mtime(layout.messages_dir(path))
+            per_project[path.name] = _iso(m)
+            if m is not None and (latest is None or m > latest):
+                latest = m
 
     warnings: list[str] = []
     days_since = None
-    if projects:
+    # 0 schaltet nur die Zeitpruefung aus, nicht die Quelle oder Bridge-Fehler.
+    if projects and "chatgpt" in chat_sources and max_days_without_chatgpt > 0:
         if latest is None:
             warnings.append("Noch keine ChatGPT-Nachricht archiviert.")
         else:
@@ -202,33 +205,38 @@ def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datet
                     f"und Native Host prüfen."
                 )
 
-    inbox_stale = _count_files(BRIDGE_INBOX, "*.json", older_than=(now - INBOX_STALE_AFTER).timestamp()) + \
-        _count_files(BRIDGE_EXPANDED, "*.json", older_than=(now - INBOX_STALE_AFTER).timestamp())
-    pending = _count_files(BRIDGE_PENDING, "*/*.json")
+    inbox_stale = 0
+    pending = 0
+    failed_recent = 0
+    log_errors = 0
+    if chat_sources:
+        inbox_stale = _count_files(BRIDGE_INBOX, "*.json", older_than=(now - INBOX_STALE_AFTER).timestamp()) + \
+            _count_files(BRIDGE_EXPANDED, "*.json", older_than=(now - INBOX_STALE_AFTER).timestamp())
+        pending = _count_files(BRIDGE_PENDING, "*/*.json")
+        failed_recent = _count_files(BRIDGE_FAILED, "*.json")
+        log_errors = _recent_log_errors((now - LOG_ERRORS_RECENT).astimezone())
     # Solange etwas in failed/ liegt, sichtbar - unabhaengig vom Alter (die
     # Datei behaelt die mtime aus der Inbox und war sonst evtl. sofort "zu alt";
     # Review Runde 3).
-    failed_recent = _count_files(BRIDGE_FAILED, "*.json")
-    log_errors = _recent_log_errors((now - LOG_ERRORS_RECENT).astimezone())
     if inbox_stale:
         warnings.append(f"{inbox_stale} Datei(en) liegen seit über einer Stunde unverarbeitet in der Bridge-Inbox.")
     if pending:
-        warnings.append(f"{pending} ChatGPT-Nachricht(en) warten auf eine Projektzuordnung (polaris pending).")
+        warnings.append(f"{pending} Nachricht(en) warten auf eine Projektzuordnung (polaris pending).")
     if failed_recent:
         warnings.append(f"{failed_recent} Datei(en) hat die Bridge abgelehnt (~/.local/share/polaris/failed/) - Grund im Bridge-Protokoll.")
     if log_errors:
         warnings.append(f"{log_errors} Fehler im Bridge-Protokoll in den letzten 24 Stunden.")
-    held = _held_back(now)
+    held = _held_back(now) if "chatgpt" in chat_sources else []
     if held:
         names = ", ".join(f"„{t}“" for t in held[:3]) + (" …" if len(held) > 3 else "")
         warnings.append(
             f"{len(held)} Chat(s) mit noch nicht übernommener letzter Antwort seit über 1 h: {names} – "
             "Chat öffnen oder im Popup „Sync now“ (gelöschter Chat: `polaris held-back --clear …`)."
         )
-    capture = _capture_problem(now)
+    capture = _capture_problem(now) if "chatgpt" in chat_sources else None
     if capture:
         warnings.append(capture)
-    stuck = _stuck_retries(now)
+    stuck = _stuck_retries(now) if chat_sources else []
     if stuck:
         example = stuck[0]
         warnings.append(

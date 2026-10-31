@@ -213,7 +213,21 @@ Stille Ausfälle (`health.py`): kommt projektübergreifend länger als
 `monitoring.max_days_without_chatgpt` (Default 3) keine ChatGPT-Nachricht an,
 oder bleiben Dateien in der Bridge-Inbox liegen, warnt `status-all`/`run-all`;
 der Timer-Lauf schickt höchstens eine Desktop-Benachrichtigung pro Tag und
-Befund.
+Befund. `monitoring.chat_sources` in `~/.config/polaris/curator.yaml` enthält
+die tatsächlich überwachten Browser-Chatquellen: `[chatgpt, claude]` (Standard),
+`[chatgpt]`, `[claude]` oder `[]` (keine Browser-Chats). Nur für ausgewählte
+Quellen prüft der Health Check Archivierung und Firefox-Berechtigungen; ohne
+Browser-Chats prüft er weder Erweiterung noch Native Host. Eine Claude-Nachricht
+deaktiviert die ChatGPT-Prüfung nicht automatisch. Steht `claude` ausdrücklich in
+der Liste, ist „noch nie eine Claude-Nachricht“ bzw. fehlender Zugriff auf
+claude.ai rot; ohne `chat_sources`-Angabe (ältere Konfigurationen) bleibt Claude
+nachsichtig. Schreibweise ist egal; unbekannte Einträge werden ignoriert und als
+Konfigurationsfehler gemeldet. Mit
+`max_days_without_chatgpt: 0` lässt sich nur die ChatGPT-Zeitprüfung aussetzen.
+Die Wahl der Chatquellen ist unabhängig von `runtime: codex|claude|command`:
+Wer z. B. Grok oder ein lokales Modell als Curator-Runtime nutzt, kann `[]`
+setzen und Dokumente weiterhin über die Inbox kuratieren. Grok-Chats werden
+ohne eigenen Erfassungsadapter nicht archiviert.
 
 ## Projektwissens-Transfer zwischen Anbietern (seit 2026-09-25)
 

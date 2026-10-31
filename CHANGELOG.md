@@ -6,6 +6,30 @@ Bridge, Curator, Installer und Werkzeuge. Hier stehen vor allem Dinge, die
 `install.sh` bzw. `polaris update` ungefragt mitändern oder die eine Nacharbeit
 verlangen. Einzelheiten stehen in der README.
 
+## Unveröffentlicht
+
+- Der Health Check überwacht nur die in `curator.yaml` unter
+  `monitoring.chat_sources` ausgewählten Browser-Chatquellen (`chatgpt`,
+  `claude` oder keine). Die Curator-Runtime bleibt davon unabhängig.
+  Bestehende Konfigurationen ohne diese Angabe behalten beide Quellen als
+  Voreinstellung. Auf Systemen ohne unterstützte Browser-Chats `[]` setzen;
+  dann prüft der Health Check weder Erweiterung noch Native Host.
+- Bei Claude-only bleibt die Bridge-Fehlerprüfung aktiv. Eine vorhandene
+  Claude-Nachricht verdeckt eine fehlende ChatGPT-Erfassung nicht mehr.
+- Nennt `monitoring.chat_sources` Claude ausdrücklich, prüft der Health Check
+  Claude so streng wie ChatGPT: noch nie eine Claude-Nachricht oder fehlender
+  Zugriff auf claude.ai ist dann rot. Ohne die Angabe bleibt Claude wie bisher
+  nachsichtig (neutral bzw. gelb).
+- Groß-/Kleinschreibung in `chat_sources` ist egal. Unbekannte Einträge (z. B.
+  `grok`) brechen nichts mehr ab, sondern erscheinen als rote Zeile
+  „Chatquellen-Konfiguration“ im Health Check und als Warnung im Curator-Lauf.
+- Ältere Firefox-Erweiterungen vor 0.2.0 melden bei aktiver Claude-Quelle jetzt
+  rot („unterstützt Claude-Erfassung noch nicht“); bitte aktualisieren.
+- Der Installer fragt bei neuen Konfigurationen nach den Chatquellen
+  (`--chat-sources` für unbeaufsichtigte Läufe). Ohne Chatquellen richtet er
+  keinen Native Host und keine Bridge-Timer ein bzw. deaktiviert vorhandene
+  Bridge-Timer beim erneuten Lauf.
+
 ## 0.4.4 (2026-10-23)
 
 - **Speicherwächter:** Der Native Host misst den größten Firefox-Tab-Prozess.

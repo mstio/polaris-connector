@@ -122,7 +122,10 @@ def cmd_status_all(args: argparse.Namespace) -> int:
     }
     from . import health as health_mod
 
-    health = health_mod.collect(projects, getattr(config_mod.load_config(), "max_days_without_chatgpt", 3))
+    cfg = config_mod.load_config()
+    sources = getattr(cfg, "chat_sources", ("chatgpt", "claude"))
+    health = health_mod.collect(projects, getattr(cfg, "max_days_without_chatgpt", 3), chat_sources=sources)
+    health["warnings"][:0] = list(getattr(cfg, "config_problems", ()))
     result = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -147,7 +150,8 @@ def cmd_status_all(args: argparse.Namespace) -> int:
         f"{summary['pending_projects']} von {summary['project_count']} Projekten offen, "
         f"{summary['planned_llm_calls']} geplante LLM-Calls"
     )
-    print(f"Letzte ChatGPT-Nachricht: {health['last_chatgpt_message_at'] or 'keine'}")
+    if "chatgpt" in sources:
+        print(f"Letzte ChatGPT-Nachricht: {health['last_chatgpt_message_at'] or 'keine'}")
     for warning in health["warnings"]:
         print(f"WARNUNG: {warning}")
     return 0
@@ -356,7 +360,10 @@ def cmd_run_all(args: argparse.Namespace) -> int:
             exit_code = 1
     from . import health as health_mod
 
-    health = health_mod.collect(projects, getattr(config_mod.load_config(), "max_days_without_chatgpt", 3))
+    cfg = config_mod.load_config()
+    sources = getattr(cfg, "chat_sources", ("chatgpt", "claude"))
+    health = health_mod.collect(projects, getattr(cfg, "max_days_without_chatgpt", 3), chat_sources=sources)
+    health["warnings"][:0] = list(getattr(cfg, "config_problems", ()))
     for r in reports:
         for w in r["report"].get("warnings") or []:
             if _important_warning(w):
@@ -566,6 +573,9 @@ def cmd_health(args: argparse.Namespace) -> int:
         config_mod.list_known_projects(),
         getattr(cfg, "max_days_without_chatgpt", 3),
         getattr(cfg, "max_days_without_claude", 7),
+        cfg.chat_sources,
+        cfg.chat_sources_explicit,
+        cfg.config_problems,
     )
     if args.json:
         print(json.dumps(data, ensure_ascii=False))

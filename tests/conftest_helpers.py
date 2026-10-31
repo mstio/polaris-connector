@@ -9,6 +9,17 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Alle temporaeren Testdateien in einen Ordner je Testlauf, der am Ende
+# geloescht wird (vorher blieben je Lauf rund 90 Ordner in /tmp liegen,
+# 2026-10-31). TMPDIR auch fuer Unterprozesse.
+import atexit as _atexit  # noqa: E402
+import os as _os  # noqa: E402
+
+_RUN_TMP = tempfile.mkdtemp(prefix="polaris-tests-")
+tempfile.tempdir = _RUN_TMP
+_os.environ["TMPDIR"] = _RUN_TMP
+_atexit.register(shutil.rmtree, _RUN_TMP, True)
+
 # polaris.config leitet seine Pfade beim Import aus Path.home() ab, und
 # pipeline.py richtet dabei sein Logging ein. Ohne diese Umleitung landeten
 # Testeintraege im echten ~/.local/state/polaris/polaris.log (2026-09-25).

@@ -14,6 +14,10 @@
 # Arbeitsordner; Shell- und Schreibwerkzeuge ueber ihre eigenen Flags
 # abschalten bzw. einen Nur-Lesen-Modus waehlen.
 provider: other
+monitoring:
+  # Browser-Chats sind optional. Ohne unterstützte Chatquelle keine
+  # ChatGPT-/Claude-Erfassungs- oder Erweiterungsprüfung.
+  chat_sources: []
 runtime: command
 model: ""
 fallback_model: null

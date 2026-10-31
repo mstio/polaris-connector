@@ -118,9 +118,17 @@ class CuratorConfig:
     max_images_per_document: int = 5
     max_chars_per_attachment: int = 20000
     # Warnung, wenn projektuebergreifend so viele Tage keine ChatGPT-
-    # Nachricht archiviert wurde (siehe health.py).
+    # Nachricht archiviert wurde (siehe health.py). 0 = Pruefung aus.
     max_days_without_chatgpt: int = 3
     max_days_without_claude: int = 7
+    chat_sources: tuple[str, ...] = ("chatgpt", "claude")
+    # True, wenn monitoring.chat_sources ausdruecklich gesetzt ist: dann gilt
+    # jede genannte Quelle als genutzt und wird streng geprueft. Ohne Angabe
+    # (aeltere Konfigurationen) bleibt Claude nachsichtig wie bisher.
+    chat_sources_explicit: bool = False
+    # Fehler in curator.yaml, die nicht zum Abbruch fuehren sollen; der Health
+    # Check zeigt sie rot an (sonst stuerzte auch der naechtliche Lauf ab).
+    config_problems: tuple[str, ...] = ()
     # Verdichtung von knowledge.md (compact.py): automatisch ab dieser Groesse,
     # hoechstens alle min_interval_days Tage. 0 = automatisch nie.
     compact_threshold_chars: int = 100000
@@ -193,6 +201,10 @@ class CuratorConfig:
         if "index_cap" in ctx:
             cfg.index_cap = max(0.0, min(0.9, float(ctx["index_cap"])))
         mon = override.get("monitoring", {}) or {}
+        if "chat_sources" in mon:
+            cfg.chat_sources, problems = _parse_chat_sources(mon["chat_sources"])
+            cfg.chat_sources_explicit = True
+            cfg.config_problems = tuple(problems)
         if "max_days_without_chatgpt" in mon:
             cfg.max_days_without_chatgpt = int(mon["max_days_without_chatgpt"])
         if "max_days_without_claude" in mon:
@@ -214,6 +226,35 @@ class CuratorConfig:
         if "max_chars_per_attachment" in att:
             cfg.max_chars_per_attachment = int(att["max_chars_per_attachment"])
         return cfg
+
+
+SUPPORTED_CHAT_SOURCES = ("chatgpt", "claude")
+
+
+def _parse_chat_sources(value: Any) -> tuple[tuple[str, ...], list[str]]:
+    """monitoring.chat_sources tolerant lesen: Gross-/Kleinschreibung und
+    Leerraum egal, Duplikate still entfernt. Unbekannte Eintraege werden
+    verworfen und als Problem gemeldet; ist der Wert keine Liste, gelten beide
+    Quellen (lieber zu viel pruefen als eine Erfassung unbemerkt ausfallen
+    lassen)."""
+    if not isinstance(value, list):
+        return SUPPORTED_CHAT_SOURCES, [
+            "curator.yaml: monitoring.chat_sources muss eine Liste sein, z. B. [chatgpt, claude] oder [] "
+            "- bis zur Korrektur werden beide Quellen geprüft"]
+    sources: list[str] = []
+    unknown: list[str] = []
+    for item in value:
+        name = str(item).strip().lower()
+        if name in SUPPORTED_CHAT_SOURCES:
+            if name not in sources:
+                sources.append(name)
+        else:
+            unknown.append(str(item))
+    problems = []
+    if unknown:
+        problems.append(f"curator.yaml: nicht unterstützte Chatquelle(n) {', '.join(unknown)} ignoriert "
+                        f"(möglich: {', '.join(SUPPORTED_CHAT_SOURCES)})")
+    return tuple(sources), problems
 
 
 def _default_config() -> CuratorConfig:

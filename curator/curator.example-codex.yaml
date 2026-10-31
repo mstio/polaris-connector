@@ -4,6 +4,8 @@
 # `polaris-curator llm-check --call` pruefen.
 provider: openai
 runtime: codex
+monitoring:
+  chat_sources: [chatgpt, claude]  # Nur die tatsächlich genutzten Chatquellen eintragen; [] = keine.
 model: gpt-6-astra
 fallback_model: gpt-5.6-sol
 # Ersatz, wenn Codex nicht erreichbar ist (Limit/Ausfall); null = aus.

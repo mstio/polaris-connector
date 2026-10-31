@@ -10,6 +10,17 @@ CURATOR_ROOT = Path(__file__).resolve().parents[1]
 if str(CURATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(CURATOR_ROOT))
 
+# Alle temporaeren Testdateien in einen Ordner je Testlauf, der am Ende
+# geloescht wird (vorher blieben je Lauf rund 90 Ordner in /tmp liegen,
+# 2026-10-31). TMPDIR auch fuer Unterprozesse.
+import atexit as _atexit  # noqa: E402
+import os as _os  # noqa: E402
+
+_RUN_TMP = tempfile.mkdtemp(prefix="polaris-tests-")
+tempfile.tempdir = _RUN_TMP
+_os.environ["TMPDIR"] = _RUN_TMP
+_atexit.register(shutil.rmtree, _RUN_TMP, True)
+
 # Tests duerfen keine echten Desktop-Benachrichtigungen ausloesen (health.py).
 import os as _os  # noqa: E402
 

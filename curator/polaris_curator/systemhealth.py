@@ -76,19 +76,31 @@ def _fmt_age(days: float | None) -> str:
 
 
 def check_archive(projects: dict, max_days: int) -> dict:
-    h = archive_health.collect(projects, max_days)
+    h = archive_health.collect(projects, max_days, chat_sources=("chatgpt",))
     if h["warnings"]:
         level = "error" if any("keine ChatGPT-Nachricht" in w for w in h["warnings"]) else "warn"
         return _c("chatgpt-archive", "ChatGPT-Archivierung", level, " ".join(h["warnings"]))
     last = h["last_chatgpt_message_at"]
+    if last is None:
+        return _c("chatgpt-archive", "ChatGPT-Archivierung", "ok", "noch keine ChatGPT-Nachricht archiviert")
     days = _age_days(last, datetime.now(timezone.utc))
     return _c("chatgpt-archive", "ChatGPT-Archivierung", "ok", f"letzte Nachricht {_fmt_age(days)}")
 
 
-def check_claude_archive(projects: dict, max_days: int, now: datetime) -> dict:
+def check_bridge_without_chatgpt(projects: dict) -> dict:
+    """Bridge-Fehler auch bei reiner Claude-Erfassung sichtbar halten."""
+    h = archive_health.collect(projects, 0, chat_sources=("claude",))
+    if h["warnings"]:
+        return _c("bridge", "Bridge", "warn", " ".join(h["warnings"]))
+    return _c("bridge", "Bridge", "ok", "keine Auffälligkeiten")
+
+
+def check_claude_archive(projects: dict, max_days: int, now: datetime, required: bool = False) -> dict:
     """Eigene Zeile fuer Claude (seit Extension 0.2.0): laengere Frist als bei
-    ChatGPT und hoechstens gelb, weil Claude unregelmaessiger genutzt wird;
-    neutral, solange noch nie eine Claude-Nachricht ankam."""
+    ChatGPT und hoechstens gelb, weil Claude unregelmaessiger genutzt wird.
+    Noch nie eine Claude-Nachricht: neutral, wenn Claude nur per Voreinstellung
+    geprueft wird; rot, wenn monitoring.chat_sources Claude ausdruecklich nennt
+    (required) - sonst bliebe eine nie funktionierende Erfassung unbemerkt."""
     latest = None
     count = 0
     # Mehrere Zuordnungen (ChatGPT + Claude-Projekte) koennen auf denselben
@@ -100,6 +112,10 @@ def check_claude_archive(projects: dict, max_days: int, now: datetime) -> dict:
             count += 1
             latest = m if latest is None or m > latest else latest
     if latest is None:
+        if required and projects:
+            return _c("claude-archive", "Claude-Archivierung", "error",
+                      "noch keine Claude-Nachricht archiviert – Erweiterung, Zugriff auf claude.ai und "
+                      "Projektzuordnung prüfen (oder claude aus monitoring.chat_sources entfernen)")
         return _c("claude-archive", "Claude-Archivierung", "ok", "noch keine Claude-Nachricht archiviert")
     days = (now.timestamp() - latest) / 86400
     detail = f"letzte Nachricht {_fmt_age(days)} ({count} Projekt(e) mit Claude-Quelle)"
@@ -243,7 +259,7 @@ def _version_tuple(v: str) -> tuple:
         return (0,)
 
 
-def check_extension() -> dict:
+def check_extension(chat_sources: tuple[str, ...] = ("chatgpt", "claude"), claude_required: bool = False) -> dict:
     for profile in _firefox_profiles():
         try:
             addons = json.loads((profile / "extensions.json").read_text(encoding="utf-8")).get("addons", [])
@@ -269,7 +285,7 @@ def check_extension() -> dict:
                 return _c("extension", "Firefox-Erweiterung", "warn",
                           f"läuft als temporär geladene Version (installiert: v{version}) – fällt nach "
                           "einem Firefox-Neustart weg; neue Version signieren lassen und installieren")
-            if not any("chatgpt.com" in o for o in origins):
+            if "chatgpt" in chat_sources and not any("chatgpt.com" in o for o in origins):
                 return _c("extension", "Firefox-Erweiterung", "error",
                           f"v{version}: Zugriff auf chatgpt.com nicht erteilt – exportiert nur nach Klick "
                           "(about:addons → Polaris → Berechtigungen)")
@@ -277,11 +293,16 @@ def check_extension() -> dict:
                 return _c("extension", "Firefox-Erweiterung", "warn",
                           f"installiert ist v{version}; eine neuere Version läuft höchstens temporär "
                           "und fällt nach einem Firefox-Neustart weg (signieren lassen)")
-            if _version_tuple(version) >= (0, 2, 0) and not any("claude.ai" in o for o in origins):
-                return _c("extension", "Firefox-Erweiterung", "warn",
+            if "claude" in chat_sources and _version_tuple(version) < (0, 2, 0):
+                return _c("extension", "Firefox-Erweiterung", "error",
+                          f"v{version} unterstützt Claude-Erfassung noch nicht")
+            if "claude" in chat_sources and not any("claude.ai" in o for o in origins):
+                return _c("extension", "Firefox-Erweiterung", "error" if claude_required else "warn",
                           f"v{version}: Zugriff auf claude.ai nicht erteilt – Claude-Export ruht "
                           "(Polaris-Symbol auf claude.ai anklicken → Zugriff erlauben)")
-            granted = "chatgpt.com" + (" und claude.ai" if any("claude.ai" in o for o in origins) else "")
+            granted = " und ".join(domain for source, domain in
+                                   (("chatgpt", "chatgpt.com"), ("claude", "claude.ai"))
+                                   if source in chat_sources and any(domain in o for o in origins))
             return _c("extension", "Firefox-Erweiterung", "ok", f"v{version}, Zugriff auf {granted} erteilt")
     return _c("extension", "Firefox-Erweiterung", "error", "nicht installiert")
 
@@ -702,8 +723,8 @@ def check_system(now: datetime | None = None) -> list[dict]:
 # Gruppen fuer die Anzeige (seit 2026-09-29, Nutzerwunsch: weniger Zeilen).
 # (id, Anzeigename, [(Kurzname, Teil-ID)], Teil-ID fuer die OK-Zusammenfassung)
 GROUPS = [
-    ("capture", "Erfassung", [("ChatGPT", "chatgpt-archive"), ("Claude", "claude-archive"),
-                              ("Erweiterung", "extension"), ("Native Host", "native-host")], "chatgpt-archive"),
+    ("capture", "Erfassung", [("ChatGPT", "chatgpt-archive"), ("Claude", "claude-archive"), ("Bridge", "bridge"),
+                              ("Konfiguration", "chat-sources"), ("Erweiterung", "extension"), ("Native Host", "native-host")], "chatgpt-archive"),
     ("separation", "Projekttrennung", [("Projekttrennung", "separation")], "separation"),
     ("curator", "Curator", [("Timer", "curator"), ("Kurationsschritte", "journal"), ("Kuration", "curation"),
                                          ("Modell", "llm"), ("Widget", "widget")],
@@ -747,16 +768,28 @@ def group_components(checks: list[dict]) -> list[dict]:
     return out
 
 
-def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_claude: int = 7) -> dict:
+def check_config(problems: tuple[str, ...]) -> dict | None:
+    if not problems:
+        return None
+    return _c("chat-sources", "Chatquellen-Konfiguration", "error", " ".join(problems))
+
+
+def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_claude: int = 7,
+            chat_sources: tuple[str, ...] = ("chatgpt", "claude"), sources_explicit: bool = False,
+            config_problems: tuple[str, ...] = ()) -> dict:
     now = datetime.now(timezone.utc)
+    claude_required = sources_explicit and "claude" in chat_sources
     checks = [
-        check_archive(projects, max_days_without_chatgpt),
-        check_claude_archive(projects, max_days_without_claude, now),
+        check_config(config_problems),
+        check_archive(projects, max_days_without_chatgpt) if "chatgpt" in chat_sources else None,
+        check_bridge_without_chatgpt(projects) if chat_sources and "chatgpt" not in chat_sources else None,
+        check_claude_archive(projects, max_days_without_claude, now, claude_required)
+        if "claude" in chat_sources else None,
         check_separation(),
         check_journals(projects),
         check_curation(projects, now),
-        check_extension(),
-        check_native_host(),
+        check_extension(chat_sources, claude_required) if chat_sources else None,
+        check_native_host() if chat_sources else None,
         check_curator_timer(),
         check_llm(),
         check_backup(now),

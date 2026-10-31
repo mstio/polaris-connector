@@ -5,6 +5,8 @@
 # `polaris-curator llm-check --call`.
 provider: anthropic
 runtime: claude
+monitoring:
+  chat_sources: [chatgpt, claude]  # Unabhängig von der Modell-Runtime; [] = keine Browser-Chats.
 model: opus
 # Ersatz bei Ausfall/Limit, ebenfalls ueber Claude; null = aus.
 fallback_model: sonnet
