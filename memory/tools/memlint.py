@@ -125,12 +125,35 @@ def agent_dir_present(p: Path) -> bool:
     return p.parent.is_dir()
 
 
+def entrypoint_problem(root: Path, link: str, target: str) -> str | None:
+    """Plausibilitaet eines Einstiegs (Sicherheitspruefung 2026-11-04):
+    entrypoints.conf kann aus einem fremdbeschreibbaren Spiegel stammen. Ein
+    Einstieg ist ein Link unter $HOME auf eine Markdown-Datei bzw. einen
+    Skill-Ordner innerhalb des Gedaechtnisses; alles andere wird nie angelegt."""
+    p = Path(link).expanduser()
+    home = Path.home()
+    if not p.is_absolute() or ".." in p.parts or home not in p.parents:
+        return "liegt nicht unter $HOME"
+    t = Path(target)
+    if t.is_absolute() or ".." in t.parts:
+        return "Ziel liegt ausserhalb des Gedaechtnisses"
+    is_skill = t.parts[:1] == ("skills",) and len(t.parts) == 2
+    if not is_skill and (p.suffix != ".md" or t.suffix != ".md"):
+        return "kein Markdown-Einstieg"
+    return None
+
+
 def link_entrypoints(root: Path) -> list[str]:
     """Legt fehlende Einstiege an, wenn der Ordner des Agenten existiert
-    (Agent installiert/benutzt). Ersetzt nie eine vorhandene Datei."""
+    (Agent installiert/benutzt). Ersetzt nie eine vorhandene Datei und legt
+    nichts an, was entrypoint_problem ablehnt."""
     done = []
     for link, target in expand_entrypoints(root).items():
         p = Path(link).expanduser()
+        problem = entrypoint_problem(root, link, target)
+        if problem:
+            done.append(f"{link}: NICHT angelegt ({problem})")
+            continue
         if p.is_symlink() or p.exists() or not agent_dir_present(p):
             continue
         p.parent.mkdir(exist_ok=True)
@@ -216,7 +239,16 @@ def lint(root: Path, system: bool = True) -> Report:
     for f in (index, agents):
         if not f.is_file():
             r.add("error", "structure", f, "fehlt")
-    md_files = sorted(p for p in root.rglob("*.md") if ".git" not in p.parts)
+    # Links, die aus dem Gedaechtnis hinauszeigen: Agenten schrieben beim
+    # Bearbeiten durch sie hindurch (z. B. auf ~/.bashrc); typisch nach dem
+    # Zurueckholen eines manipulierten Spiegels (Zweitmeinung 2026-11-04).
+    root_real = root.resolve()
+    for p in root.rglob("*"):
+        if p.is_symlink() and ".git" not in p.parts:
+            target = p.resolve()
+            if target != root_real and root_real not in target.parents:
+                r.add("error", "symlinks", p.relative_to(root), f"zeigt aus dem Gedaechtnis hinaus auf {target}")
+    md_files = sorted(p for p in root.rglob("*.md") if ".git" not in p.parts and not p.is_symlink())
     layer_files = {layer: sorted((root / layer).glob("*.md")) for layer in LAYERS}
     index_text = index.read_text(encoding="utf-8") if index.is_file() else ""
 
@@ -343,6 +375,10 @@ def lint(root: Path, system: bool = True) -> Report:
         home = Path.home()
         for link, target in expand_entrypoints(root).items():
             p = Path(link).expanduser()
+            problem = entrypoint_problem(root, link, target)
+            if problem:
+                r.add("error", "entrypoints", link, f"unzulaessiger Einstieg in entrypoints.conf ({problem})")
+                continue
             if not agent_dir_present(p):
                 continue  # Agent auf diesem Rechner nicht eingerichtet
             if not p.exists():

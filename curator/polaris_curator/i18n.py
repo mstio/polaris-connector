@@ -188,6 +188,8 @@ EN: dict[str, str] = {
         'copy outdated ({names}) – {hint}',
     './install.sh --yes --no-units --no-backup --no-memory, dann omarchy restart shell':
         './install.sh --yes --no-units --no-backup --no-memory, then omarchy restart shell',
+    'git-Checkout, aktualisiert per omarchy plugin update':
+        'git checkout, updated by omarchy plugin update',
     'Kopie aktuell':
         'copy up to date',
     'Prüfung nicht möglich (offline?) – polaris update --check':
@@ -210,8 +212,6 @@ EN: dict[str, str] = {
         'unknown runtime {runtime!r}',
     '{main} fehlt – polaris-curator llm-check':
         '{main} missing – polaris-curator llm-check',
-    '{runtime} {model}; {missing} (Ersatz/Prüfer) fehlt':
-        '{runtime} {model}; {missing} (fallback/reviewer) missing',
     'installiert, aber noch kein Snapshot':
         'installed, but no snapshot yet',
     'Zustandsdatei unlesbar':
@@ -250,8 +250,8 @@ EN: dict[str, str] = {
         'consistent, {n} entries',
     'Spiegel noch nie gelaufen – polaris-memory-mirror':
         'mirror never ran – polaris-memory-mirror',
-    'Spiegel neuer als lokal – erst zurückholen (polaris-memory-mirror)':
-        'mirror newer than local – pull it first (polaris-memory-mirror)',
+    'Spiegel neuer als lokal – Unterschiede prüfen, nur nach Entscheidung zurückholen (polaris-memory-mirror)':
+        'mirror newer than local – review the differences, restore only after deciding (polaris-memory-mirror)',
     'Spiegel {age}':
         'mirror {age}',
     'gespiegelt {age}':
@@ -338,6 +338,16 @@ EN: dict[str, str] = {
         'curator.yaml: unsupported chat source(s) {unknown} ignored (possible: {supported})',
     'curator.yaml: monitoring.chat_sources muss eine Liste sein, z. B. [chatgpt, claude] oder [] - bis zur Korrektur werden beide Quellen geprüft':
         'curator.yaml: monitoring.chat_sources must be a list, e.g. [chatgpt, claude] or [] - both sources are checked until fixed',
+    'ohne Sandbox: {problem}':
+        'without sandbox: {problem}',
+    '{missing} (Ersatz/Prüfer) fehlt':
+        '{missing} (fallback/reviewer) missing',
+    'Spiegel gesperrt: bei der Installation nicht zurückgeholt – entscheiden (polaris-memory-mirror)':
+        'mirror on hold: not restored during installation – decide (polaris-memory-mirror)',
+    '{file}: unlesbar ({error}) - Projekt-Override ignoriert':
+        '{file}: unreadable ({error}) - project override ignored',
+    '{file}: nicht erlaubte Schluessel ignoriert ({keys}) - Laufzeit, Befehl und Modell nur in der lokalen curator.yaml':
+        '{file}: disallowed keys ignored ({keys}) - runtime, command and model only in the local curator.yaml',
     'curator.yaml: language muss de oder en sein (gefunden: {value}) - bis zur Korrektur gilt de':
         'curator.yaml: language must be de or en (found: {value}) - de applies until fixed',
 }

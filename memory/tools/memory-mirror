@@ -81,6 +81,23 @@ if [ ! -d "$parent" ]; then
   exit 75
 fi
 
+# Sperre nach einer Neuinstallation, bei der der vorhandene Spiegel bewusst
+# NICHT zurueckgeholt wurde (install.sh legt sie an): Sonst ueberschriebe die
+# frische Vorlage hier den echten Spiegel. Erst entscheiden: zurueckholen
+# (danach Sperre loeschen) oder den lokalen Stand bewusst durchsetzen.
+if [ -e "$SRC/.mirror-hold" ]; then
+  if [ -n "${POLARIS_MIRROR_FORCE:-}" ]; then
+    rm -f -- "$SRC/.mirror-hold"
+  else
+    echo "memory-mirror: gesperrt ($SRC/.mirror-hold) - vorhandener Spiegel wurde bei der Installation nicht zurueckgeholt." >&2
+    echo "  Unterschiede ansehen: rsync -rltn --safe-links --itemize-changes --exclude=.alt/ --exclude=/tools/ '$target/' '$SRC/'" >&2
+    echo "  Dann entweder zurueckholen (ohne -n) und '$SRC/.mirror-hold' loeschen," >&2
+    echo "  oder den lokalen Stand durchsetzen: POLARIS_MIRROR_FORCE=1 polaris-memory-mirror" >&2
+    write_state hold "Spiegel nicht zurueckgeholt - Nutzer entscheidet"
+    exit 1
+  fi
+fi
+
 # Schutz nach einer Wiederherstellung: Bringt ein Snapshot ein aelteres
 # Gedaechtnis zurueck, als im Spiegel liegt, wuerde der Lauf den neueren Stand
 # ueberschreiben. Dann nichts tun und melden (rsync -t uebernimmt die
@@ -90,9 +107,12 @@ if [ -d "$target" ] && [ -z "${POLARIS_MIRROR_FORCE:-}" ]; then
   src_new="$(newest "$SRC")"; dst_new="$(newest "$target")"
   if [ -n "$dst_new" ] && [ "${dst_new:-0}" -gt "$(( ${src_new:-0} + 60 ))" ]; then
     echo "memory-mirror: Spiegel ist neuer als $SRC ($(date -d "@$dst_new" '+%F %H:%M') gegen $(date -d "@${src_new:-0}" '+%F %H:%M'))." >&2
-    echo "  Erst zurueckholen: rsync -rlt --exclude=.alt/ '$target/' '$SRC/'" >&2
+    # Der Spiegel liegt meist auf einem Cloud-Laufwerk, in das auch andere
+    # schreiben koennen: nie blind zurueckholen, tools/ nie.
+    echo "  Unterschiede ansehen: rsync -rltn --safe-links --itemize-changes --exclude=.alt/ --exclude=/tools/ '$target/' '$SRC/'" >&2
+    echo "  Nur nach Entscheidung des Nutzers zurueckholen: dasselbe ohne -n." >&2
     echo "  Oder lokalen Stand bewusst durchsetzen: POLARIS_MIRROR_FORCE=1 polaris-memory-mirror" >&2
-    write_state mirror_newer "Spiegel neuer als lokal - erst zurueckholen"
+    write_state mirror_newer "Spiegel neuer als lokal - Unterschiede pruefen, Nutzer entscheidet"
     exit 1
   fi
 fi

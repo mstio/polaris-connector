@@ -127,6 +127,41 @@ class InstallShTest(unittest.TestCase):
         self.assertTrue((mem / "handoff" / "omarchy-radar.md").is_file())
         self.assertIn("| `handoff/omarchy-radar.md` |", (mem / "AI_HANDOFF.md").read_text())
 
+    def _mirror(self):
+        mirror = self.base / "drive" / "Maschinengedaechtnis"
+        (mirror / "tools").mkdir(parents=True)
+        (mirror / "AGENTS.md").write_text("# Regeln aus dem Spiegel\n")
+        (mirror / "tools" / "memlint.py").write_text("raise SystemExit('fremdes memlint')\n")
+        return mirror
+
+    def test_mirror_is_not_restored_without_explicit_decision(self):
+        # Sicherheitspruefung 2026-11-04: Der Spiegel liegt auf einem
+        # Cloud-Laufwerk; AGENTS.md steuert alle Agenten.
+        mirror = self._mirror()
+        args = [a for a in BASE_ARGS if a != "--no-memory"] + ["--memory-mirror", str(mirror)]
+        r = self.install(*args)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        mem = self.home / ".config" / "ai-agents"
+        self.assertNotIn("aus dem Spiegel", (mem / "AGENTS.md").read_text())
+        self.assertIn("--memory-from-mirror", r.stdout)
+        # Und der echte Spiegel wird nicht mit der frischen Vorlage ueberschrieben.
+        self.assertTrue((mem / ".mirror-hold").exists())
+        m = subprocess.run([str(REPO / "memory" / "tools" / "memory-mirror")], env=self.env,
+                           capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(m.returncode, 0)
+        self.assertIn("gesperrt", m.stderr)
+        self.assertIn("Regeln aus dem Spiegel", (mirror / "AGENTS.md").read_text())
+
+    def test_mirror_restore_never_brings_tools(self):
+        mirror = self._mirror()
+        args = [a for a in BASE_ARGS if a != "--no-memory"] + ["--memory-mirror", str(mirror), "--memory-from-mirror"]
+        r = self.install(*args)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        mem = self.home / ".config" / "ai-agents"
+        self.assertIn("aus dem Spiegel", (mem / "AGENTS.md").read_text())
+        self.assertEqual((mem / "tools" / "memlint.py").read_bytes(),
+                         (REPO / "memory" / "tools" / "memlint.py").read_bytes())
+
     def _new_curator_yaml(self, *extra, lang="C.UTF-8"):
         self.env["LANG"] = lang
         args = [a for a in BASE_ARGS] + list(extra)

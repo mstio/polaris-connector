@@ -1,55 +1,101 @@
-# Polaris Curator – Omarchy bar widget
+# Polaris – Omarchy bar widget
 
-Theme-aware control panel for the Polaris Curator. It shows pending ChatGPT
-messages and project inbox documents, starts one project or all open projects,
-reports the result, exposes the automatic timer state, and opens the curated
-knowledge files.
+![Polaris widget with the health check](preview.png)
 
-The widget is intentionally a thin UI. Project discovery, status calculation,
-locking, budgets, LLM execution, atomic merges, and inbox archiving stay in the
-`polaris-curator` CLI.
+The bar widget for [Polaris](https://github.com/mstio/polaris-connector), a
+project memory for [Omarchy](https://omarchy.org): your ChatGPT and Claude
+project chats, meeting transcripts, mails and documents become three short,
+sourced files per project – what is known, what was decided, what is still
+open.
 
-Language: English or German, from `language: en|de` in
-`~/.config/polaris/curator.yaml` (default without the line: German). The CLI
-passes it as `language` in its JSON; the widget translates its own fixed texts.
+The widget shows:
 
-## Installation
+- **new material per project** (chat messages, inbox files) and what a run
+  would cost (planned model calls)
+- **one-click curation** for one project or all open projects
+- **quick access** to `knowledge.md`, `decisions.md`, `open-loops.md` and the
+  project folder
+- **a health check:** capture, project separation, curation, storage and
+  backup, machine memory, security and updates, plus disk, failed systemd
+  units, battery and crashes
 
-`./install.sh` in the parent repository does all of this (copy, enable,
-backup of a replaced copy). Manually, from the parent
-`polaris-chatgpt-connector` repository:
+## Requirements
+
+This widget is the display of Polaris; it does nothing on its own. Install
+Polaris first, as described in its
+[README](https://github.com/mstio/polaris-connector#install). The widget
+itself downloads, builds and installs nothing.
+
+The widget then needs on `PATH`: `polaris-curator` (from Polaris), `jq`,
+`systemctl`, `systemd-run` and `xdg-open`. Without `polaris-curator` it only
+shows "Polaris Curator is not installed". Polaris' own requirements and
+privacy notes: see its
+[README](https://github.com/mstio/polaris-connector#privacy-and-legal-notice).
+
+## Install
+
+From the Omarchy plugin marketplace, or:
 
 ```bash
-install -d ~/.config/omarchy/plugins/mst.polaris-curator
-cp -a "$PWD/omarchy-plugin/mst.polaris-curator/." \
-  ~/.config/omarchy/plugins/mst.polaris-curator/
-omarchy plugin enable mst.polaris-curator center
+omarchy plugin add https://github.com/mstio/mst.polaris-curator --enable
 ```
 
-Omarchy's plugin validator intentionally rejects a plugin directory that is
-itself a symlink, so the active installation is a copy. After updating this
-repository, sync it with `./install.sh --yes --no-units --no-backup --no-memory`
-(backs up the old copy), then `omarchy restart shell`. The health check shows
-a "Widget" part under Curator that turns yellow while the copy is outdated.
+Polaris' `install.sh` also installs the widget if it is missing. Updates:
+`omarchy plugin update mst.polaris-curator` (or `polaris update`).
 
-Manual runs ("Kuratieren", "Alle") start as the transient systemd user unit
-`polaris-curator-manual` (`bin/run-action`), not as a child of the shell: they
-survive `omarchy restart shell`, run in the same environment as the timer, and
-the fixed unit name prevents a second concurrent manual run. The JSON result
-goes to `~/.local/state/polaris/manual-run.json`; the log is in
-`journalctl --user -u polaris-curator-manual`. After a shell restart the widget
-picks up a still running manual run and shows its result when it ends.
+## Remove
 
-The plugin expects `polaris-curator`, `jq`, `systemctl`, `systemd-run`, and `xdg-open` on
-`PATH`. It uses no native Qt file dialog because that integration is unstable
-in Quickshell on the target system.
+```bash
+omarchy plugin remove mst.polaris-curator
+```
 
-## Status semantics
+This removes only the widget. Polaris itself, your project folders and the
+curated files stay untouched (uninstalling Polaris: see its
+[reference](https://github.com/mstio/polaris-connector/blob/main/docs/reference.md)).
+
+## What it runs
+
+The widget is a thin UI; all logic stays in the `polaris-curator` CLI.
+
+- `bin/status-json` reads `polaris-curator status-all --json` and
+  `polaris-curator health --json` plus the timer state (`systemctl --user
+  show`). It runs when the panel opens or refreshes, not on a timer. While the
+  screen is locked it shows the last state instead of touching project
+  folders.
+- `bin/run-action` starts manual runs as the transient systemd user unit
+  `polaris-curator-manual` (`systemd-run --user`): it survives a shell
+  restart, runs in the same environment as Polaris' own timer, and the fixed
+  unit name prevents two concurrent runs. Project names are passed as single
+  arguments; no shell command is built from UI data. The result goes to
+  `~/.local/state/polaris/manual-run.json`, the log to
+  `journalctl --user -u polaris-curator-manual`.
+- Opening files uses `xdg-open`. No root, no network access of its own, no
+  changes to your configuration.
+
+## Language
+
+English or German, from `language: en|de` in `~/.config/polaris/curator.yaml`
+(default without the line: German). The CLI passes it as `language` in its
+JSON; the widget translates its own fixed texts.
+
+## Status in the bar
 
 - muted dot: all projects are current
-- small accent dot: pending source units
+- small accent dot: pending sources
 - accent spinner: a manual run is active
-- urgent dot: status or the last manual action failed
+- urgent dot: status or the last action failed, or the health check reports
+  a problem
 
 `backfill` is deliberately not exposed: it can reprocess already curated
-messages and create redundant knowledge entries.
+messages and create redundant entries.
+
+## Development
+
+The source of this widget lives in the Polaris repository under
+`omarchy-plugin/mst.polaris-curator/`; this repository is published from
+there. Without a git checkout of the widget, Polaris' `install.sh` installs a
+copy instead, and its health check reports when that copy is outdated.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

@@ -7,7 +7,7 @@
 #   ./install.sh [--yes] [--dry-run] [--projects <Ordner>] [--runtime codex|claude|command]
 #                [--chat-sources both|chatgpt|claude|none]
 #                [--no-units] [--no-widget] [--no-dock] [--no-restart] [--no-backup] [--no-memory]
-#                [--backup-target <Ordner>] [--memory-mirror <Ordner>]
+#                [--backup-target <Ordner>] [--memory-mirror <Ordner>] [--memory-from-mirror]
 #
 #   Ohne Optionen und in einem Terminal fragt das Skript die Einstellungen ab,
 #   zeigt eine Zusammenfassung und richtet erst nach Bestaetigung ein.
@@ -86,7 +86,7 @@ OB_PLUGIN_URL="https://github.com/mstio/mst.omarchy-backup.git"
 AL_URL="https://github.com/mstio/mst.agent-launchers.git"
 
 ORIG_ARGS=("$@")  # fuer den Neustart aus dem App-Ordner (die Schleife verbraucht "$@")
-ONLY_EXISTING=0 DRY=0 PROJECTS="" RUNTIME="" UI_LANG="" CHAT_SOURCES="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR=""
+ONLY_EXISTING=0 DRY=0 PROJECTS="" RUNTIME="" UI_LANG="" CHAT_SOURCES="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR="" MIRROR_RESTORE=0
 GUIDED=0; [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ] && GUIDED=1
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -105,6 +105,7 @@ while [ $# -gt 0 ]; do
     --yes|-y) YES=1 ;;
     --backup-target) OB_TARGET="${2:?--backup-target braucht einen Ordner}"; shift ;;
     --memory-mirror) MIRROR="${2:?--memory-mirror braucht einen Ordner}"; shift ;;
+    --memory-from-mirror) MIRROR_RESTORE=1 ;;
     --storage-unit) STORAGE_UNIT="${2:?--storage-unit braucht eine Unit oder none}"; shift ;;
     -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/,"");print;next} NR>1{exit}' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $1" >&2; exit 2 ;;
@@ -417,16 +418,42 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ] && [ ! -e "$MEM" ]; then
     mirror_src="$(sed -n "s/^memory_mirror: *['\"]\{0,1\}\([^'\"]*\)['\"]\{0,1\} *$/\1/p" "$POLARIS_CFG/config.yaml" | head -1)"
     mirror_src="$(untilde "$mirror_src")"
   fi
+  # Zurueckholen nur auf ausdrueckliche Entscheidung: Der Spiegel liegt
+  # meist auf einem Cloud-Laufwerk, und AGENTS.md steuert alle Agenten mit
+  # sudo-Zugang (Sicherheitspruefung 2026-11-04). tools/ kommt nie aus dem
+  # Spiegel, sondern immer aus Polaris.
+  restore_mirror=0
+  if [ "$MIRROR_RESTORE" = 1 ] && ! [ -f "${mirror_src:-/nonexistent}/AGENTS.md" ]; then
+    warn "--memory-from-mirror: kein Spiegel mit AGENTS.md gefunden (${mirror_src:-memory_mirror nicht gesetzt}) - Gedaechtnis aus der Vorlage"
+  fi
   if [ -n "$mirror_src" ] && [ -f "$mirror_src/AGENTS.md" ]; then
-    if [ "$DRY" = 1 ]; then say "  [dry-run] aus dem Spiegel zurueckholen: $(tilde "$mirror_src")"
+    if [ "$MIRROR_RESTORE" = 1 ]; then restore_mirror=1
+    elif [ "$YES" = 0 ] && [ "$DRY" = 0 ]; then
+      say "  Spiegel gefunden: $(tilde "$mirror_src") (vorher ansehen; er bestimmt die Regeln aller Agenten)"
+      ask_yn "   Gedaechtnis daraus zurueckholen?" n && restore_mirror=1
+    else
+      say "  Spiegel gefunden, nicht zurueckgeholt (bewusst mit --memory-from-mirror): $(tilde "$mirror_src")"
+    fi
+  fi
+  if [ "$restore_mirror" = 1 ]; then
+    if [ "$DRY" = 1 ]; then say "  [dry-run] aus dem Spiegel zurueckholen (ohne tools/): $(tilde "$mirror_src")"
     else
       mkdir -p "$MEM"
-      if command -v rsync >/dev/null; then rsync -rlt --exclude=.alt/ -- "$mirror_src/" "$MEM/"
-      else cp -a -- "$mirror_src/." "$MEM/" && rm -rf -- "$MEM/.alt"; fi
-      say "  aus dem Spiegel zurueckgeholt: $(tilde "$mirror_src")"
+      # --safe-links: Links, die aus dem Spiegel hinauszeigen (z. B. auf
+      # ~/.bashrc), kommen nicht mit; ohne rsync gar keine Links.
+      if command -v rsync >/dev/null; then rsync -rlt --safe-links --exclude=.alt/ --exclude=/tools/ -- "$mirror_src/" "$MEM/"
+      else cp -a -- "$mirror_src/." "$MEM/" && rm -rf -- "${MEM:?}/.alt" "${MEM:?}/tools" \
+        && find "$MEM" -type l -delete; fi
+      say "  aus dem Spiegel zurueckgeholt (ohne tools/): $(tilde "$mirror_src")"
     fi
   else
     run mkdir -p "$MEM"/handoff "$MEM"/knowledge "$MEM"/history "$MEM"/system-history "$MEM"/tools
+    # Vorhandener Spiegel nicht zurueckgeholt: Spiegeln sperren, sonst
+    # ueberschriebe die frische Vorlage ihn (polaris-memory-mirror).
+    if [ -n "$mirror_src" ] && [ -d "$mirror_src" ] && [ -n "$(ls -A -- "$mirror_src" 2>/dev/null)" ]; then
+      if [ "$DRY" = 1 ]; then say "  [dry-run] Spiegeln gesperrt bis zur Entscheidung ($MEM/.mirror-hold)"
+      else : > "$MEM/.mirror-hold"; say "  Spiegeln gesperrt, bis du entschieden hast (siehe polaris-memory-mirror)"; fi
+    fi
     run cp -n "$REPO"/memory/template/AGENTS.md "$REPO"/memory/template/AI_HANDOFF.md \
       "$REPO"/memory/template/entrypoints.conf "$MEM/"
     # Platzhalter, bis polaris-radar das erste Mal laeuft (AGENTS.md verweist darauf)

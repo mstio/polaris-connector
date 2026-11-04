@@ -17,6 +17,7 @@ STATE_DIR/tab-memory.json, wofuer er schon gewarnt hat.
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import shutil
@@ -126,7 +127,9 @@ def _notify(level: str, size: int) -> bool:
     body = ("Meist ist es ein ChatGPT- oder Claude-Tab. Dort F5 drücken (Neu laden) gibt den Speicher frei. "
             "Wächst er weiter, beendet das System sonst ganz Firefox.")
     try:
-        subprocess.run(["notify-send", "-u", urgency, "-a", "Polaris", title, body],
+        # notify-send deutet Pango-Markup; Inhalte koennen von Webseiten stammen.
+        subprocess.run(["notify-send", "-u", urgency, "-a", "Polaris", html.escape(title, quote=False),
+                        html.escape(body, quote=False)],
                        check=False, timeout=10)
         return True
     except (OSError, subprocess.SubprocessError):

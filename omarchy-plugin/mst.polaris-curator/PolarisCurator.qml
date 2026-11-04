@@ -475,6 +475,7 @@ Panel {
                   spacing: 0
                   Text {
                     text: root.t(modelData.label)
+                    textFormat: Text.PlainText  // Fremdtext (Dateinamen, Radar) nie als HTML deuten
                     color: Commons.Color.foreground
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
@@ -484,6 +485,7 @@ Panel {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     text: root.t(modelData.detail)
+                    textFormat: Text.PlainText  // Fremdtext (Dateinamen, Radar) nie als HTML deuten
                     color: modelData.level === "ok" ? Commons.Color.muted : root.levelColor(modelData.level)
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
@@ -496,6 +498,7 @@ Panel {
               wrapMode: Text.Wrap
               visible: text.length > 0
               text: root.systemSummary()
+              textFormat: Text.PlainText  // Fremdtext (Fehlermeldungen der Modell-CLI) nie als HTML deuten
               color: Commons.Color.muted
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -532,6 +535,7 @@ Panel {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 text: "• " + modelData
+                textFormat: Text.PlainText  // Fremdtext (Dateinamen, Radar) nie als HTML deuten
                 color: Commons.Color.urgent
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
@@ -591,6 +595,7 @@ Panel {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             text: root.lastResult
+            textFormat: Text.PlainText  // Fremdtext (Fehlermeldungen der Modell-CLI) nie als HTML deuten
             color: root.lastResultOk ? Commons.Color.muted : Commons.Color.urgent
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
@@ -611,6 +616,7 @@ Panel {
                 Layout.fillWidth: true
                 Text {
                   text: modelData.name
+                  textFormat: Text.PlainText  // Fremdtext (Dateinamen, Radar) nie als HTML deuten
                   color: Commons.Color.foreground
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
@@ -629,6 +635,7 @@ Panel {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 text: root.projectSources(modelData)
+                textFormat: Text.PlainText  // Fremdtext (Dateinamen, Radar) nie als HTML deuten
                 color: Commons.Color.muted
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
@@ -637,6 +644,7 @@ Panel {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 text: root.projectPlan(modelData)
+                textFormat: Text.PlainText  // Fremdtext (Dateinamen, Radar) nie als HTML deuten
                 color: Commons.Color.muted
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption

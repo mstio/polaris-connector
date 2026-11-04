@@ -5,6 +5,7 @@ Keine fachliche Analyse, keine Zusammenfassung, keine KI.
 
 from __future__ import annotations
 
+import html
 import contextlib
 import fcntl
 import json
@@ -83,7 +84,7 @@ def _notify_conflict(detail: str) -> None:
     try:
         subprocess.run(
             ["notify-send", "-u", "critical", "-a", "Polaris Bridge",
-             "Polaris: Nachricht im falschen Projekt abgewehrt", detail],
+             "Polaris: Nachricht im falschen Projekt abgewehrt", html.escape(detail, quote=False)],
             check=False, timeout=10,
         )
         stamp.parent.mkdir(parents=True, exist_ok=True)

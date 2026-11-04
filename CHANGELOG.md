@@ -8,6 +8,39 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Sicherheit (Prüfung vom 2026-11-04, Grundsatz „never trust your input“):**
+  - `<Projekt>/.polaris/curator-config.yaml` darf nur noch `batching`, `budget`,
+    `context`, `monitoring`, `compaction` und `attachments` setzen. Laufzeit,
+    Befehl (`runtime: command`), Anbieter und Modelle kommen nur aus der lokalen
+    `curator.yaml`. Vorher konnte jeder, der in einen Projektordner auf dem
+    Cloud-Laufwerk schreiben kann, damit Befehle als Nutzer ausführen. Andere
+    Schlüssel werden ignoriert und im Health Check gemeldet.
+  - Gedächtnis-Spiegel: `install.sh` holt ihn nur noch mit
+    `--memory-from-mirror` oder nach Rückfrage zurück, `tools/` nie. Der Health
+    Check startet memlint aus dem Programm, nicht aus `~/.config/ai-agents`.
+    memlint legt nur noch Einstiege unter `$HOME` auf Markdown-Dateien bzw.
+    Skill-Ordner im Gedächtnis an.
+  - codex (Curator) und pdftotext laufen in bubblewrap: kein Blick ins Home,
+    geleerte Umgebung (keine Tokens aus der Shell), codex mit eigenem
+    `CODEX_HOME`, das nur die Anmeldung enthält (Sitzungsprotokolle in
+    `~/.codex` bleiben unsichtbar), pdftotext ohne Netz. Fehlt die Sandbox,
+    meldet der Health Check das (Zeile „Modell“).
+  - Projekt-Overrides dürfen Läufe nur billiger oder seltener machen, nie
+    teurer; unlesbare Werte werden gemeldet statt den Lauf abzubrechen.
+  - Spiegel: Links, die aus dem Gedächtnis hinauszeigen, kommen nicht mit;
+    memlint meldet solche Links rot (`symlinks`). Wurde ein vorhandener
+    Spiegel bei der Installation nicht zurückgeholt, sperrt `.mirror-hold` das
+    Spiegeln, bis entschieden ist.
+  - Radar: fremde Links, Kennungen, Daten und Versionen werden streng geprüft;
+    Benachrichtigungen maskieren Markup, das Widget zeigt Fremdtext nur als
+    reinen Text.
+- Agentenleitfaden: Updates erst nach Blick des Nutzers auf die neuen Commits
+  einspielen; Spiegel nie blind zurückholen.
+- Das Widget gibt es auch als eigenes Plugin-Repo `mstio/mst.polaris-curator`
+  (für den Omarchy-Plugin-Marktplatz), Anzeigename jetzt „Polaris“. Ein so
+  installiertes Widget (git-Checkout) lässt `install.sh` in Ruhe,
+  `polaris update` aktualisiert es per `omarchy plugin update`, der Health Check
+  vergleicht es nicht mehr mit dem Quellordner.
 - Widget und Health Check sprechen Englisch oder Deutsch: `language: en|de` in
   `~/.config/polaris/curator.yaml`. Ohne die Zeile bleibt alles deutsch,
   bestehende Installationen ändern sich also nicht. Neue Installationen

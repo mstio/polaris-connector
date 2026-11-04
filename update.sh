@@ -61,7 +61,7 @@ update_extras() {
     fi
   fi
   command -v omarchy >/dev/null || return 0
-  for id in mst.agent-launchers mst.omarchy-backup; do
+  for id in mst.polaris-curator mst.agent-launchers mst.omarchy-backup; do
     [ -d "$HOME/.config/omarchy/plugins/$id/.git" ] || continue
     timeout 120 omarchy plugin update "$id" --yes >/dev/null 2>&1 \
       || echo "polaris update: Widget $id nicht aktualisiert (omarchy plugin update $id)" >&2

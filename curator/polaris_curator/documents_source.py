@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from . import layout, office_extract, state as state_mod, storage
+from . import sandbox
 
 logger = logging.getLogger("polaris_curator")
 
@@ -125,8 +126,11 @@ def _extract_pdf_bytes(data: bytes) -> str:
     with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
         tmp.write(data)
         tmp.flush()
+        # Fremde PDFs (Mail-Anhaenge) ohne Netz und ohne Sicht aufs Home
+        # parsen: poppler hat immer wieder Speicherfehler (Sicherheitspruefung
+        # 2026-11-04).
         result = subprocess.run(
-            ["pdftotext", "-layout", tmp.name, "-"],
+            sandbox.wrap(["pdftotext", "-layout", tmp.name, "-"], ro=[tmp.name]),
             capture_output=True,
             text=True,
             timeout=60,

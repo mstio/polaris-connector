@@ -84,7 +84,12 @@ Module (`curator/polaris_curator/`):
 Global: `~/.config/polaris/curator.yaml` (wird beim ersten Lauf mit
 Standardwerten angelegt). Projektspezifischer Override (optional):
 `<Project>/.polaris/curator-config.yaml` (gleiches Format, nur die
-gesetzten Felder ueberschreiben den globalen Wert).
+gesetzten Felder ueberschreiben den globalen Wert). Erlaubt sind dort nur
+`batching`, `budget`, `context`, `monitoring`, `compaction` und
+`attachments`. Laufzeit, Befehl (`runtime: command`), Anbieter und Modelle
+kommen ausschliesslich aus der lokalen `curator.yaml`: Projektordner liegen
+oft auf einem Cloud-Laufwerk, in das auch andere schreiben koennen. Andere
+Schluessel werden ignoriert und im Health Check gemeldet.
 
 Sprache (seit 2026-11-04): `language: de` oder `language: en` in der globalen
 `curator.yaml` stellt Widget und Health Check um. Fehlt die Zeile, gilt `de`

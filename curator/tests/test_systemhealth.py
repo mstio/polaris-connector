@@ -198,7 +198,8 @@ class TestMemoryCheck(unittest.TestCase):
         f.write_text("# stub")
         out = stdout if stdout is not None else json.dumps(report)
         done = unittest.mock.Mock(stdout=out, returncode=0)
-        with patch.object(sh, "MEMLINT", f), patch.object(sh.subprocess, "run", return_value=done):
+        with patch.object(sh, "MEMLINT", f), patch.object(sh, "MEM_ROOT", f.parent), \
+                patch.object(sh.subprocess, "run", return_value=done):
             return sh.check_memory()
 
     def test_clean_is_ok(self):
@@ -221,7 +222,8 @@ class TestMemoryCheck(unittest.TestCase):
             self.assertEqual(c["level"], "error", check)
 
     def test_missing_or_broken_memlint_warns(self):
-        with patch.object(sh, "MEMLINT", Path("/nonexistent/memlint.py")):
+        with patch.object(sh, "MEMLINT", Path("/nonexistent/memlint.py")), \
+                patch.object(sh, "MEM_ROOT", Path(tempfile.mkdtemp())):
             self.assertEqual(sh.check_memory()["level"], "warn")
         self.assertEqual(self._run(stdout="kein json")["level"], "warn")
 
@@ -354,6 +356,20 @@ class TestWidgetCheck(unittest.TestCase):
             self.assertIn(name, c["detail"])
         self.assertIn("install.sh", c["detail"])
 
+    def test_doc_files_do_not_count(self):
+        src, active = self._dirs()
+        (src / "README.md").write_text("neu")
+        (src / "preview.png").write_bytes(b"x")
+        self.assertEqual(sh.check_widget(src, active)["level"], "ok")
+
+    def test_git_checkout_is_ok_without_comparing(self):
+        src, active = self._dirs()
+        (src / "Widget.qml").write_text("neu")
+        (active / ".git").mkdir()
+        c = sh.check_widget(src, active)
+        self.assertEqual(c["level"], "ok")
+        self.assertIn("git", c["detail"])
+
     def test_not_installed_gives_no_line(self):
         src, active = self._dirs()
         self.assertIsNone(sh.check_widget(src, active.parent / "fehlt"))
@@ -420,11 +436,19 @@ class TestOptionalParts(unittest.TestCase):
 
     def test_memory_not_set_up(self):
         base = Path(tempfile.mkdtemp())
-        with patch.object(sh, "MEMLINT", base / "ai-agents" / "tools" / "memlint.py"):
+        with patch.object(sh, "MEMLINT", base / "ai-agents" / "tools" / "memlint.py"), \
+                patch.object(sh, "MEM_ROOT", base / "ai-agents"):
             self.assertEqual(sh.check_memory()["detail"], "nicht eingerichtet (optional)")
         (base / "ai-agents").mkdir()
-        with patch.object(sh, "MEMLINT", base / "ai-agents" / "tools" / "memlint.py"):
+        with patch.object(sh, "MEMLINT", base / "ai-agents" / "tools" / "memlint.py"), \
+                patch.object(sh, "MEM_ROOT", base / "ai-agents"):
             self.assertEqual(sh.check_memory()["level"], "warn")
+
+    def test_memlint_comes_from_the_program_not_the_memory(self):
+        # Sicherheitspruefung 2026-11-04: ~/.config/ai-agents kann aus einem
+        # fremdbeschreibbaren Spiegel stammen; ausgefuehrt wird die Programmkopie.
+        self.assertEqual(sh.MEMLINT, sh._REPO_MEMLINT)
+        self.assertNotIn(".config/ai-agents", str(sh.MEMLINT))
 
 
 class TestLlmCheck(unittest.TestCase):

@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import sandbox
 from .change_schema import JSON_SCHEMA
 from .config import CuratorConfig
 
@@ -70,6 +72,29 @@ def _parse_tokens_used(stderr: str) -> int | None:
     return values[-1]
 
 
+def _sync_back_codex_auth(private: Path, real: Path, before: bytes) -> None:
+    """Hat codex die Anmeldung in der Sandbox erneuert, sie atomar nach
+    ~/.codex zurueckschreiben - nur gueltiges JSON und nur, wenn sich die
+    echte Datei inzwischen nicht selbst geaendert hat."""
+    try:
+        after = private.read_bytes()
+        if after == before or real.read_bytes() != before:
+            return
+        json.loads(after)
+    except (OSError, ValueError):
+        logger.warning("codex-Anmeldung aus der Sandbox nicht zurueckgeschrieben")
+        return
+    tmp = real.with_name(f".{real.name}.polaris-{os.getpid()}")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(after)
+        os.replace(tmp, real)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        logger.warning("codex-Anmeldung konnte nicht zurueckgeschrieben werden")
+
+
 def _run_codex_exec(
     prompt: str,
     model: str,
@@ -92,8 +117,16 @@ def _run_codex_exec(
             # als weiteren Bildpfad schlucken.
             image_args.append(f"--image={image_path}")
 
+        # Sandbox (Sicherheitspruefung 2026-11-04): codex' eigener Modus
+        # "read-only" verbietet Schreiben und Netz, erlaubt aber das Lesen
+        # aller Dateien. Eingeschleuste Anweisungen in Chats oder Anhaengen
+        # koennten sonst Schluessel aus dem Home in die Antwort holen. In
+        # bubblewrap sieht codex nur das System, sein Programm, ~/.codex
+        # (Anmeldung) und dieses Arbeitsverzeichnis.
+        codex_bin = sandbox.resolve_binary("codex")
+        codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
         cmd = [
-            "codex",
+            str(codex_bin) if codex_bin else "codex",
             "exec",
             *image_args,
             "--skip-git-repo-check",
@@ -118,6 +151,19 @@ def _run_codex_exec(
             "-",
         ]
 
+        # Eigenes CODEX_HOME nur mit der Anmeldung: Sitzungsprotokolle,
+        # Verlauf und Datenbanken in ~/.codex bleiben unsichtbar (Zweitmeinung
+        # 2026-11-04). Eine erneuerte Anmeldung wird danach zurueckgeschrieben.
+        auth_src = codex_home / "auth.json"
+        private_home = tmp / "codex-home"
+        private_home.mkdir(mode=0o700)
+        auth_before = None
+        if codex_bin is not None and sandbox.available() and auth_src.is_file():
+            auth_before = auth_src.read_bytes()
+            (private_home / "auth.json").write_bytes(auth_before)
+            os.chmod(private_home / "auth.json", 0o600)
+            cmd = sandbox.wrap(cmd, ro=[codex_bin.parent.parent], rw=[tmp], net=True,
+                               home=Path.home(), env={"CODEX_HOME": str(private_home)})
         try:
             result = subprocess.run(
                 cmd,
@@ -128,6 +174,9 @@ def _run_codex_exec(
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise LlmUnavailableError(f"codex exec konnte nicht ausgefuehrt werden: {exc}") from exc
+
+        if auth_before is not None:
+            _sync_back_codex_auth(private_home / "auth.json", auth_src, auth_before)
 
         if result.returncode != 0:
             raise LlmUnavailableError(

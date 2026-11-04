@@ -27,7 +27,12 @@ NATIVE_MANIFEST = HOME / ".mozilla" / "native-messaging-hosts" / "polaris_bridge
 FIREFOX_DIR = HOME / ".config" / "mozilla" / "firefox"
 BACKUP_STATE = HOME / ".local" / "share" / "omarchy-backup" / "state.json"
 POLARIS_CONFIG_DIR = HOME / ".config" / "polaris"
-MEMLINT = HOME / ".config" / "ai-agents" / "tools" / "memlint.py"
+# memlint aus dem Polaris-Programm, nicht aus ~/.config/ai-agents/tools:
+# Der Health Check fuehrt es alle 10 min aus, und das Gedaechtnis kann aus
+# einem fremdbeschreibbaren Spiegel stammen (Sicherheitspruefung 2026-11-04).
+_REPO_MEMLINT = Path(__file__).resolve().parents[2] / "memory" / "tools" / "memlint.py"
+MEM_ROOT = HOME / ".config" / "ai-agents"
+MEMLINT = _REPO_MEMLINT if _REPO_MEMLINT.is_file() else MEM_ROOT / "tools" / "memlint.py"
 MEMORY_MIRROR_STATE = HOME / ".local" / "state" / "polaris" / "memory-mirror.json"
 MEMORY_MIRROR_MAX_DAYS = 2
 # Sicherheitsabgleich von polaris-radar (seit 2026-11-02; Timer taeglich).
@@ -35,7 +40,7 @@ SECURITY_STATE = HOME / ".local" / "state" / "polaris" / "security.json"
 SECURITY_MAX_DAYS = 3
 # memlint-Befunde, bei denen Wissen verloren gehen oder nach aussen gelangen
 # kann -> rot; alles andere (kaputter Verweis, fehlender Tag, Rueckkopie) gelb.
-MEMLINT_SEVERE = {"backup", "entrypoints", "secrets"}
+MEMLINT_SEVERE = {"backup", "entrypoints", "secrets", "symlinks"}
 MIN_EXTENSION_VERSION = (0, 1, 2)
 # Omarchy lehnt symlinkte Plugin-Ordner ab, aktiv ist eine Kopie (install.sh).
 WIDGET_ID = "mst.polaris-curator"
@@ -200,6 +205,10 @@ def check_curation(projects: dict, now: datetime | None = None) -> dict:
             from . import config as config_mod, context as context_mod
 
             pcfg = config_mod.load_config(path)
+            # Abgewiesene oder unlesbare Projekt-Overrides vorn einreihen:
+            # moeglicher Angriff ueber das Cloud-Laufwerk.
+            for prob in reversed([p for p in getattr(pcfg, "config_problems", ()) if "curator-config.yaml" in p]):
+                problems.insert(0, prob)
             full = getattr(pcfg, "full_context_chars", 0)
             cap = getattr(pcfg, "index_cap", context_mod.INDEX_CAP)
             for fname, is_dec in (("knowledge.md", False), ("open-loops.md", False), ("decisions.md", True)):
@@ -330,8 +339,14 @@ def check_native_host() -> dict:
     return _c("native-host", "Native Host", "ok", t("registriert"))
 
 
+# Nur fuer die Doku des Plugin-Repos; eine abweichende Kopie aendert nichts an
+# der Funktion und ist keine Warnung wert (seit 2026-11-04).
+WIDGET_DOC_FILES = {"README.md", "LICENSE", "preview.png"}
+
+
 def _tree(root: Path) -> dict[str, bytes]:
-    return {str(f.relative_to(root)): f.read_bytes() for f in sorted(root.rglob("*")) if f.is_file()}
+    return {str(f.relative_to(root)): f.read_bytes() for f in sorted(root.rglob("*"))
+            if f.is_file() and str(f.relative_to(root)) not in WIDGET_DOC_FILES}
 
 
 def check_widget(src: Path | None = None, active: Path | None = None) -> dict | None:
@@ -342,6 +357,10 @@ def check_widget(src: Path | None = None, active: Path | None = None) -> dict | 
     active = active or WIDGET_ACTIVE
     if not active.is_dir() or not src.is_dir():
         return None
+    # Aus dem Marktplatz bzw. per `omarchy plugin add` (seit 2026-11-04):
+    # aktualisiert `omarchy plugin update`, keine Kopie zu vergleichen.
+    if (active / ".git").exists():
+        return _c("widget", "Widget", "ok", t("git-Checkout, aktualisiert per omarchy plugin update"))
     try:
         want, have = _tree(src), _tree(active)
     except OSError as exc:
@@ -411,9 +430,16 @@ def check_llm() -> dict:
     main = llm.main_binary(cfg)
     if main in missing:
         return _c("llm", label, "error", t("{main} fehlt – polaris-curator llm-check", main=main))
+    # Fremdinhalte (Chats, Anhaenge) laufen in bubblewrap; ohne Sandbox laut melden.
+    from . import sandbox
+    notes = []
     if missing:
-        return _c("llm", label, "warn", t("{runtime} {model}; {missing} (Ersatz/Prüfer) fehlt",
-                                         runtime=cfg.runtime, model=cfg.model, missing=", ".join(missing)))
+        notes.append(t("{missing} (Ersatz/Prüfer) fehlt", missing=", ".join(missing)))
+    problem = sandbox.status()
+    if problem:
+        notes.append(t("ohne Sandbox: {problem}", problem=problem))
+    if notes:
+        return _c("llm", label, "warn", f"{cfg.runtime} {cfg.model}; " + "; ".join(notes))
     return _c("llm", label, "ok", f"{cfg.runtime} {cfg.model}")
 
 
@@ -533,12 +559,13 @@ def check_mount() -> dict:
 def check_memory() -> dict:
     """Maschinengedaechtnis ~/.config/ai-agents per memlint (deterministisch, stdlib)."""
     label = t("Maschinengedächtnis")
+    if not MEM_ROOT.is_dir():
+        return _c("memory", label, "ok", t("nicht eingerichtet (optional)"))
     if not MEMLINT.is_file():
-        if not MEMLINT.parent.parent.is_dir():
-            return _c("memory", label, "ok", t("nicht eingerichtet (optional)"))
         return _c("memory", label, "warn", t("{path} fehlt", path=MEMLINT))
     try:
-        proc = subprocess.run(["python3", str(MEMLINT), "--json"], capture_output=True, text=True, timeout=30,
+        proc = subprocess.run(["python3", str(MEMLINT), "--json", "--root", str(MEM_ROOT)],
+                              capture_output=True, text=True, timeout=30,
                               env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         report = json.loads(proc.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -595,8 +622,10 @@ def mirror_status(now: datetime | None = None) -> tuple[str, str]:
         state = json.loads(MEMORY_MIRROR_STATE.read_text())
     except (OSError, ValueError):
         return "warn", t("Spiegel noch nie gelaufen – polaris-memory-mirror")
+    if state.get("last_result") == "hold":
+        return "warn", t("Spiegel gesperrt: bei der Installation nicht zurückgeholt – entscheiden (polaris-memory-mirror)")
     if state.get("last_result") == "mirror_newer":
-        return "warn", t("Spiegel neuer als lokal – erst zurückholen (polaris-memory-mirror)")
+        return "warn", t("Spiegel neuer als lokal – Unterschiede prüfen, nur nach Entscheidung zurückholen (polaris-memory-mirror)")
     days = _age_days(state.get("last_success"), now)
     if days is None or days > MEMORY_MIRROR_MAX_DAYS:
         why = f" ({state.get('detail')})" if state.get("last_result") != "ok" and state.get("detail") else ""

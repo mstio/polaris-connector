@@ -131,6 +131,8 @@ class CuratorConfig:
     # Fehler in curator.yaml, die nicht zum Abbruch fuehren sollen; der Health
     # Check zeigt sie rot an (sonst stuerzte auch der naechtliche Lauf ab).
     config_problems: tuple[str, ...] = ()
+    # Schluessel eines Projekt-Overrides, die ignoriert wurden (Sicherheit).
+    project_refused_keys: tuple[str, ...] = ()
     # Sprache von Widget und Health Check (i18n.py, seit 2026-11-04). Fehlt der
     # Schluessel, gilt "de" (Bestandsinstallationen bleiben deutsch); nur die
     # Vorgabe einer Neuinstallation (ensure_global_config) schreibt "en".
@@ -304,15 +306,62 @@ def ensure_global_config() -> None:
     tmp.replace(GLOBAL_CONFIG_FILE)
 
 
+# Was ein Projekt-Override aendern darf. Projektordner liegen oft auf einem
+# Cloud-Laufwerk, in das auch andere schreiben koennen; Laufzeit, Befehl,
+# Anbieter und Modelle (runtime: command fuehrt `command` aus) kommen deshalb
+# nur aus der lokalen curator.yaml (Sicherheitspruefung 2026-11-04).
+PROJECT_OVERRIDE_KEYS = frozenset({"batching", "budget", "context", "monitoring",
+                                   "compaction", "attachments"})
+
+
+# Projektwert darf nur in diese Richtung vom globalen abweichen:
+# "min" = hoechstens so gross wie global, "max" = mindestens so gross.
+_PROJECT_LIMITS = {
+    "max_batches_per_run": "min", "max_llm_calls_per_run": "min", "max_messages_per_batch": "min",
+    "max_input_chars_per_batch": "min", "max_total_input_chars_per_run": "min",
+    "document_oversize_factor": "min", "max_parts_per_document": "min",
+    "max_curated_context_chars": "min", "full_context_chars": "min",
+    "max_chars_per_attachment": "min", "max_images_per_document": "min",
+    "min_messages_for_early_run": "max", "min_chars_for_early_run": "max",
+    "compact_min_interval_days": "max", "loops_review_interval_days": "max",
+    "compact_threshold_chars": "max", "min_image_bytes": "max",
+}
+
+
 def load_config(project_path: Path | None = None) -> CuratorConfig:
     """Laedt die globale Konfiguration und wendet, falls vorhanden, einen
     projektspezifischen Override aus <Project>/.polaris/curator-config.yaml
-    an."""
+    an - nur die Schluessel aus PROJECT_OVERRIDE_KEYS; andere werden
+    ignoriert und als Problem gemeldet (Health Check)."""
     ensure_global_config()
     cfg = _default_config().merged_with(_read_yaml(GLOBAL_CONFIG_FILE))
     if project_path is not None:
         project_override = project_path / ".polaris" / "curator-config.yaml"
-        cfg = cfg.merged_with(_read_yaml(project_override))
+        raw = _read_yaml(project_override)
+        if not isinstance(raw, dict):
+            raw = {}
+        refused = sorted(str(k) for k in raw if k not in PROJECT_OVERRIDE_KEYS)
+        lang = i18n.resolve(cfg.language)
+        try:
+            proj = cfg.merged_with({k: v for k, v in raw.items() if k in PROJECT_OVERRIDE_KEYS})
+        except (ValueError, TypeError, AttributeError) as exc:
+            cfg.config_problems = cfg.config_problems + (i18n.t_lang(
+                lang, "{file}: unlesbar ({error}) - Projekt-Override ignoriert",
+                file=f"{project_path.name}/.polaris/curator-config.yaml", error=str(exc)[:80]),)
+            proj = cfg
+        # Ein Projekt darf Laeufe nur billiger/seltener machen, nie teurer
+        # (Zweitmeinung 2026-11-04: Budgets aus dem Cloud-Ordner).
+        for name, direction in _PROJECT_LIMITS.items():
+            g, v = getattr(cfg, name), getattr(proj, name)
+            if direction == "min" and v > g or direction == "max" and v < g:
+                setattr(proj, name, g)
+        cfg = proj
+        if refused:
+            cfg.project_refused_keys = tuple(refused)
+            cfg.config_problems = cfg.config_problems + (i18n.t_lang(
+                i18n.resolve(cfg.language),
+                "{file}: nicht erlaubte Schluessel ignoriert ({keys}) - Laufzeit, Befehl und Modell nur in der lokalen curator.yaml",
+                file=f"{project_path.name}/.polaris/curator-config.yaml", keys=", ".join(refused)),)
     return cfg
 
 

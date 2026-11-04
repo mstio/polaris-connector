@@ -66,6 +66,19 @@ the protection. Folders are read only during the check, and the fingerprints
 are not stored. Limit: rephrased or translated content cannot be detected by
 any mechanical check.
 
+## Widget repository for the plugin marketplace (maintainer)
+
+The Omarchy plugin marketplace needs one plugin per repository with
+`manifest.json` at its root. `scripts/publish-plugin.sh [<ref>] [--push]`
+publishes `omarchy-plugin/mst.polaris-curator/` as
+[mstio/mst.polaris-curator](https://github.com/mstio/mst.polaris-curator):
+`omarchy plugin validate`, privacy check, one commit per release with the
+GitHub noreply address, the same pre-push hook as the public mirror. Without
+`--push` it only commits locally. A widget installed from there is a git
+checkout: `install.sh` leaves it alone, `polaris update` runs
+`omarchy plugin update` for it, and the health check does not compare it with
+the source folder.
+
 ## Public mirror (maintainer)
 
 Development happens in a private repository with full history. Released

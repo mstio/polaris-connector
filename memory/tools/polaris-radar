@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import html
 import json
 import os
 import re
@@ -106,6 +107,33 @@ def clean(text: str, limit: int = 120) -> str:
     return f"`{s}`" if s else "`(leer)`"
 
 
+_URL_RE = re.compile(r"^https://[A-Za-z0-9.-]+(?:/[A-Za-z0-9._~%/?#&=+:@!,;*()-]*)?$")
+_TOKEN_RE = re.compile(r"^[A-Za-z0-9._:+~-]{1,64}$")
+
+
+def url(value, limit: int = 300) -> str:
+    """Fremde Links nur als schlichte https-URL (Sicherheitspruefung
+    2026-11-04): keine Leerzeichen, Backticks oder Markup."""
+    s = str(value or "").strip()
+    return s if len(s) <= limit and _URL_RE.match(s) else "(Link entfernt)"
+
+
+def token(value) -> str:
+    """Fremde Kurzangaben (CVE, AVG, Version, Datum, Schweregrad) nur aus
+    unverdaechtigen Zeichen, sonst '?'."""
+    s = str(value if value is not None else "").strip()
+    return s if _TOKEN_RE.match(s) else "?"
+
+
+_PHRASE_RE = re.compile(r"^[A-Za-z0-9 ./()+-]{1,40}$")
+
+
+def phrase(value) -> str:
+    """Kurze fremde Wortgruppe (z. B. Arch-Tracker-Typ "denial of service")."""
+    s = re.sub(r"\s+", " ", str(value if value is not None else "")).strip()
+    return s if _PHRASE_RE.match(s) else "?"
+
+
 def load_cfg() -> dict:
     if not CFG.is_file():
         return {}
@@ -167,7 +195,7 @@ def commits(repo: str, since: str, branch: str | None = None) -> list[dict]:
         if branch:
             q += f"&sha={branch}"
         batch = gh(q)
-        out += [{"sha": c["sha"], "date": c["commit"]["author"]["date"][:10],
+        out += [{"sha": token(c["sha"]), "date": token(c["commit"]["author"]["date"][:10]),
                  "title": c["commit"]["message"].split("\n", 1)[0]} for c in batch]
         if len(batch) < 100:
             break
@@ -189,7 +217,7 @@ def news(since: dt.datetime) -> list[str]:
         except (TypeError, ValueError):
             continue
         if when >= since:
-            out.append(f"- {when:%d.%m.}: {clean(item.findtext('title'))} {item.findtext('link') or ''}".rstrip())
+            out.append(f"- {when:%d.%m.}: {clean(item.findtext('title'))} {url(item.findtext('link'))}".rstrip())
     return out
 
 
@@ -200,12 +228,12 @@ def watch(cfg: dict) -> list[str]:
         if not m:
             continue
         i = gh(f"repos/{m[1]}/issues/{m[2]}")
-        lines.append(f"- {spec}: **{i['state']}**, zuletzt geändert {i['updated_at'][:10]} – {clean(i['title'])}")
+        lines.append(f"- {spec}: **{token(i['state'])}**, zuletzt geändert {token(i['updated_at'][:10])} – {clean(i['title'])}")
     for repo in cfg.get("watch_repos") or []:
         r = gh(f"repos/{repo}")
         rel = gh(f"repos/{repo}/releases?per_page=1")
         tag = f"{rel[0]['tag_name']} ({rel[0]['published_at'][:10]})" if rel else "kein Release"
-        lines.append(f"- {repo}: neuestes Release {clean(tag, 40)}, letzter Push {r['pushed_at'][:10]}")
+        lines.append(f"- {repo}: neuestes Release {clean(tag, 40)}, letzter Push {token(r['pushed_at'][:10])}")
     return lines
 
 
@@ -311,7 +339,7 @@ def nvd_verdict(matches: list[dict], products: set[tuple[str, str]], installed: 
             if c is None:
                 return None
             if c == 0:
-                return "betroffen", f"Version {exact} gelistet"
+                return "betroffen", f"Version {token(exact)} gelistet"
             continue
         if not bounds:
             return None                      # ohne Bereich nicht entscheidbar
@@ -325,11 +353,11 @@ def nvd_verdict(matches: list[dict], products: set[tuple[str, str]], installed: 
                     return None
                 inside = inside and ok(c)
         if inside:
-            span = " ".join(f"{'≥' if 'StartInc' in k else '>' if 'StartExc' in k else '≤' if 'EndInc' in k else '<'}{v}"
+            span = " ".join(f"{'≥' if 'StartInc' in k else '>' if 'StartExc' in k else '≤' if 'EndInc' in k else '<'}{token(v)}"
                             for k, v in bounds.items())
             return "betroffen", f"{ver} liegt in {span}"
         if "versionEndExcluding" in bounds:
-            fixes.append(bounds["versionEndExcluding"])
+            fixes.append(token(bounds["versionEndExcluding"]))
     fix = f"; Fix-Stände {', '.join(fixes[-3:])}" if fixes else ""
     return "nicht betroffen", f"{ver} liegt außerhalb der betroffenen Bereiche{fix}"
 
@@ -359,15 +387,15 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
                 continue
             for cve in g.get("issues") or []:
                 if g.get("fixed"):
-                    tracker_fix.setdefault(cve, []).extend((p, g["fixed"]) for p in g.get("packages") or [])
+                    tracker_fix.setdefault(token(cve), []).extend((p, token(g["fixed"])) for p in g.get("packages") or [])
             for p in g.get("packages") or []:
                 if p not in pkgs:
                     continue
                 if g.get("fixed") and older(pkgs[p], g["fixed"]):
-                    cves = ", ".join((g.get("issues") or [])[:3])
-                    finds.append({"id": f"{g['name']}:{p}", "level": "warn",
-                                  "text": f"{p} {pkgs[p]} → Fix in {g['fixed']} ({g['name']}, {g.get('severity')}, "
-                                          f"{g.get('type')}; {cves}) – Update einspielen"})
+                    cves = ", ".join(token(c) for c in (g.get("issues") or [])[:3])
+                    finds.append({"id": f"{token(g['name'])}:{p}", "level": "warn",
+                                  "text": f"{p} {pkgs[p]} → Fix in {token(g['fixed'])} ({token(g['name'])}, "
+                                          f"{token(g.get('severity'))}, {phrase(g.get('type'))}; {cves}) – Update einspielen"})
                 elif not g.get("fixed") and g.get("status") == "Vulnerable":
                     unfixed += 1
         n = len([f for f in finds if f["id"].startswith("AVG")])
@@ -390,7 +418,7 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
                 up = branch[0]
                 lag = kernel_version(up["version"])[2] - rv[2]
                 when = (up.get("released") or {}).get("isodate", "?")
-                text = f"Kernel {running} läuft, Upstream-Stable {up['version']} ({when}): {max(lag, 0)} Releases Rückstand"
+                text = f"Kernel {running} läuft, Upstream-Stable {token(up['version'])} ({token(when)}): {max(lag, 0)} Releases Rückstand"
                 if lag >= lag_warn:
                     finds.append({"id": f"kernel-lag:{running}", "level": "warn",
                                   "text": text + f" (Grenze {lag_warn}) – Kernel-Update abwarten/prüfen"})
@@ -410,7 +438,7 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
                 continue
             vend, prod = str(v.get("vendorProject", "")).lower(), str(v.get("product", "")).lower()
             raw_prod, prod = prod, aliases.get(prod, prod)
-            cve = v.get("cveID")
+            cve = token(v.get("cveID"))
             fixed_here = [f"{p} {f}" for p, f in tracker_fix.get(cve, []) if p in pkgs and not older(pkgs[p], f)]
             if fixed_here:
                 lines.append(f"- {cve} (aktiv ausgenutzt) laut Arch-Tracker behoben: {', '.join(fixed_here)}.")
@@ -436,7 +464,7 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
             else:
                 continue
             finds.append({"id": f"kev:{cve}", "level": "warn",
-                          "text": f"aktiv ausgenutzt: {cve} ({v.get('dateAdded')}) betrifft {hit} – "
+                          "text": f"aktiv ausgenutzt: {cve} ({token(v.get('dateAdded'))}) betrifft {hit} – "
                                   f"{clean(v.get('vulnerabilityName'), 90)}; Fix-Stand prüfen"})
         lines.append(f"- CISA KEV: aktiv ausgenutzte Lücken der letzten {days} Tage gegen Kernel und installierte Pakete "
                      "abgeglichen, Paketversionen gegen die NVD. https://www.cisa.gov/known-exploited-vulnerabilities-catalog")
@@ -503,7 +531,7 @@ def main() -> int:
         sel = [c for c in cs if hits(c["title"], keywords)]
         found.extend(c["sha"] for c in sel)
         lines = [f"- {c['date']} {clean(c['title'])} https://github.com/{OMARCHY}/commit/{c['sha'][:7]}" for c in sel]
-        lines += [f"- Release {clean(r['tag_name'], 40)} ({r['published_at'][:10]}) {r['html_url']}" for r in rel]
+        lines += [f"- Release {clean(r['tag_name'], 40)} ({token(r['published_at'][:10])}) {url(r['html_url'])}" for r in rel]
         lines.append(f"- Insgesamt {len(cs)} Commits auf `{branch}` im Zeitraum, {len(sel)} passend zu den Stichworten.")
         return lines
 
@@ -590,8 +618,10 @@ def main() -> int:
     STATE.write_text(json.dumps({"last_run": now.isoformat(), "seen": sorted(seen | set(found))[-2000:]}), encoding="utf-8")
 
     if a.notify and sec_new and not os.environ.get("POLARIS_NO_NOTIFY"):
+        # notify-send deutet Pango-Markup: Fremdtext maskieren.
         subprocess.run(["notify-send", "-a", "Polaris", "-u", "critical", "Sicherheit",
-                        f"{len(sec_new)} neue(r) Befund(e): {sec_new[0]['text'][:140]} – {target}"],
+                        html.escape(f"{len(sec_new)} neue(r) Befund(e): {sec_new[0]['text'][:140]} – {target}",
+                                    quote=False)],
                        check=False, timeout=10)
     elif a.notify and new and not os.environ.get("POLARIS_NO_NOTIFY"):
         subprocess.run(["notify-send", "-a", "Polaris", "Omarchy-Radar",

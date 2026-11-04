@@ -13,6 +13,7 @@ importiert die Bridge aber bewusst nicht (lose Kopplung wie in config.py).
 
 from __future__ import annotations
 
+import html
 import hashlib
 import json
 import os
@@ -295,7 +296,7 @@ def notify_once_per_day(health: dict, now: datetime | None = None) -> bool:
     try:
         subprocess.run(
             ["notify-send", "-u", "critical", "-a", "Polaris Curator", t("Polaris: Archivierung prüfen"),
-             "\n".join(warnings)],
+             html.escape("\n".join(warnings), quote=False)],
             check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
