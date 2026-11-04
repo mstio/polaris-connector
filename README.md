@@ -1,513 +1,409 @@
-# Polaris ChatGPT Connector
+# Polaris
 
-Archiviert ausgewaehlte ChatGPT- und Claude-Projekt-Unterhaltungen lokal,
-Turn fuer Turn, als Rohdaten unter `<Projekt>/raw/chatgpt/` bzw.
-`<Projekt>/raw/claude/`. Keine Zusammenfassung, keine KI, keine
-Cloud-Infrastruktur - siehe Prinzipien im Auftrag. Aktuelle Extension-Version:
-siehe `extension/manifest.json`.
+Polaris keeps a curated, local memory for each of your projects. Conversations
+from ChatGPT and Claude projects, documents and mails flow into plain project
+folders; a curator turns them into condensed project knowledge
+(`knowledge.md`, `decisions.md`, `open-loops.md`). Everything stays on your
+machine as readable files. Built for [Omarchy](https://omarchy.org) (Arch Linux
++ Hyprland), most parts work on any Linux desktop.
 
-Dieses Repo enthaelt zusaetzlich den **Polaris Curator** (`curator/`), der
-auf diesen Rohdaten aufbaut und daraus kondensiertes Projektwissen
-(`knowledge.md`, `decisions.md`, `open-loops.md`) erzeugt - siehe
-`curator/README.md` fuer dessen eigene Dokumentation. Der Connector (dieses
-Dokument) kennt keine KI und keine Curator-Logik; die Trennung ist bewusst.
+Principles:
 
-Unter `omarchy-plugin/mst.polaris-curator/` liegt ausserdem das zugehoerige
-theme-aware Omarchy-Bar-Widget. Es zeigt neue Chat- und Inbox-Quellen pro
-Projekt, startet einzelne oder alle offenen Curator-Laeufe und oeffnet die
-kuratierten Wissensdateien. Die Installation ist im Plugin-README beschrieben.
+- **Local and readable.** Raw data and curated knowledge are plain JSON and
+  Markdown in your own folders. No database, no cloud service of its own.
+- **Files are the interface.** Components never import each other; they meet
+  in the project folder. Each part can be replaced or left out.
+- **Never guess.** Unclear project assignments wait for you instead of being
+  filed somewhere plausible.
+- **Cheap in the background.** No polling daemons: systemd path units,
+  timers and on-demand processes only.
 
-## Schnellstart auf einem neuen Omarchy-Rechner
+Current extension version: see `extension/manifest.json`. What changed between
+versions, including side effects of `install.sh`: [`CHANGELOG.md`](CHANGELOG.md)
+(German). Most detailed documents in this repository are written in German.
 
-```bash
-git clone <repo> ~/Projects/polaris-chatgpt-connector
-cd ~/Projects/polaris-chatgpt-connector
-./install.sh                                # gefuehrt: fragt nach, Zusammenfassung, Bestaetigung
-./install.sh --dry-run --projects ~/Projekte   # ohne Fragen: nur anzeigen
-./install.sh --yes --projects ~/Projekte    # ohne Fragen: einrichten
-polaris-curator llm-check --call            # Modell-CLI angemeldet? (kostet einen kleinen Aufruf)
+## Architecture: core and modules
+
+Polaris is a small **core** with **modules** around it. The core is the
+project memory; everything else feeds it, shows it or keeps the machine
+healthy.
+
+| Part | What it is | Lives in |
+|---|---|---|
+| **Core: project memory** | Project folder layout, the curator that condenses sources into knowledge, the `polaris` / `polaris-curator` CLIs | `curator/`, `bridge/polaris/mapping.py`, `bridge/bin/polaris` |
+| Source: browser capture | Firefox extension + native messaging host + bridge; archives ChatGPT and Claude project chats turn by turn into `raw/` | `extension/`, `bridge/` |
+| Source: ChatGPT data export | Fills gaps from the official export, or files old chats as Markdown without curation | `polaris import-export`, `polaris archive-export` |
+| Source: inbox | Documents, notes and mails dropped into `<project>/inbox/` | `curator/` (see `curator/README.md`) |
+| Model runtimes | The curator calls an agent CLI: `codex`, `claude` or any command | `curator/curator.example-*.yaml` |
+| Display: curator widget | Omarchy bar widget: pending sources, start runs, open knowledge files, health check | `omarchy-plugin/mst.polaris-curator/` |
+| Cross-cutting: health check | One overview of capture, curation, backup, memory, security and system state | `curator/polaris_curator/systemhealth.py` |
+| Cross-cutting: radar | Omarchy news, plugin updates and a daily security check (Arch tracker, kernel, CISA KEV, NVD) | `memory/tools/polaris-radar` |
+| Cross-cutting: machine memory | Shared Markdown memory for all local AI agents, with linter, template and mirror | `memory/` |
+| Bundled (own repos) | [omarchy-backup](https://github.com/mstio/omarchy-backup) with its widget, agent launchers, dock | `extras/` in the install bundle only |
+| Developer tooling | Install bundle, privacy check with protected folders, public mirror | `make-bundle.sh`, `scripts/` |
+
+```
+ ChatGPT / Claude (Firefox)     official export      documents, mails
+          |                          |                      |
+   extension -> native host     polaris import-export       |
+          |      -> bridge           |                      |
+          v                          v                      v
+   <project>/raw/<chatgpt|claude>/  ...................  <project>/inbox/
+                         \                              /
+                          `----> polaris-curator <-----'      model runtime
+                                       |                  <-- (codex, claude,
+                                       v                       any command)
+              <project>/knowledge.md, decisions.md, open-loops.md
+                                       |
+          curator widget, health check, your agents, your editor
 ```
 
-`install.sh` ist idempotent (auf einem fertig eingerichteten Rechner ein
-No-op) und installiert nichts aus dem Netz: Symlinks `~/.local/bin/polaris`
-und `polaris-curator`, Bridge-Konfiguration und `project_roots`, eine
-`curator.yaml` aus `curator/curator.example-{codex,claude}.yaml` (nur wenn
-keine existiert; Runtime `codex`, wenn installiert, sonst `claude`, oder
-`--runtime`; Chatquellen mit `--chat-sources both|chatgpt|claude|none`),
-die systemd-Units (Bridge-Path/-Timer, Curator-Timer), den
-Firefox-Native-Host und das Omarchy-Widget. Ersetzte Dateien sichert es nach
-`~/.local/share/polaris/install-backups/<Zeit>/`. Voraussetzungen: `python3`
-mit PyYAML (`python-yaml`), fuer das Widget `jq`, fuer den Curator `codex`
-oder `claude` (angemeldet), fuer die Erweiterung Firefox. Die Erweiterung
-selbst wird von Hand installiert (siehe „Extension installieren“).
-In `~/.config/polaris/curator.yaml` legt `monitoring.chat_sources` fest,
-welche Browser-Chats der Health Check überwacht: `[chatgpt, claude]`,
-`[chatgpt]`, `[claude]` oder `[]`. Die Liste ist unabhängig von der Modell-
-Runtime. Bei `[]` kann der Curator mit `runtime: command` weiterhin ein
-anderes Modell nutzen und Dokumente aus der Inbox verarbeiten; die Firefox-
-Erweiterung wird dann nicht als fehlend gemeldet. Grok-Chats selbst werden
-derzeit nicht erfasst.
-Aus einem git-Checkout sind omarchy-backup und das Maschinengedaechtnis
-(`~/.config/ai-agents`) optional; der Health Check zeigt sie dann als „nicht
-eingerichtet“. Das Installationspaket bringt beide mit (siehe unten).
+Direction of travel: the health check should only read one state file per
+module (the radar already works that way with
+`~/.local/state/polaris/security.json`), so that it can become a standalone
+package and modules can be installed one by one. Today `install.sh` still
+sets up all modules together and the health check knows each of them.
 
-### Aktualisieren: `polaris update` (seit 2026-10-23)
-
-Ein git-Checkout (z. B. ein Klon des oeffentlichen Spiegels) wird wie ein
-Omarchy-Plugin aktualisiert:
+## Quick start on a new Omarchy machine
 
 ```bash
-polaris update            # Aenderungen zeigen, nachfragen, aktualisieren
-polaris update --yes      # ohne Nachfrage (Agenten)
-polaris update --check    # nur nachsehen; Exit 0 = Update da
+git clone https://github.com/mstio/polaris-connector ~/Projects/polaris-connector
+cd ~/Projects/polaris-connector
+./install.sh                                   # guided: asks, shows a summary, confirms
+./install.sh --dry-run --projects ~/Projekte   # no questions: only show what would happen
+./install.sh --yes --projects ~/Projekte       # no questions: set up
+polaris-curator llm-check --call               # model CLI logged in? (costs one small call)
 ```
 
-Ablauf (`update.sh`): `git fetch`, nur Fast-Forward, dann `install.sh --yes`
-fuer das, was schon eingerichtet ist (Units, Widget, Dock, Gedaechtnis), dann
-`polaris-curator health`. Lokale Commits oder geaenderte Dateien brechen ab
-(eigene Aenderungen gehoeren in einen Branch oder Pull Request). Wird der
-Health-Check durch das Update rot oder scheitert `install.sh`, geht es zurueck
-auf den alten Commit. Der Health-Check zeigt hoechstens einmal am Tag
-(`git fetch`) eine Zeile „Update: verfuegbar …“. Versionsnummer ist die der
-Erweiterung (`extension/manifest.json`).
+`install.sh` is idempotent (a no-op on a machine that is already set up) and
+downloads nothing. It creates:
 
-Liegen die Projektordner auf einem Laufwerk, das ein eigener systemd-Dienst
-einhaengt (z. B. rclone), starten Bridge, Curator und Spiegel danach:
-`install.sh --storage-unit <unit>` legt dafuer Drop-ins
-`<unit>.d/polaris-storage.conf` an (Standard: `rclone-projekte.service`, falls
-vorhanden). Lokale Ordner, etwa ein Nextcloud-Sync-Ordner, brauchen nichts
+- symlinks `~/.local/bin/polaris` and `polaris-curator`
+- the bridge configuration and `project_roots`
+- a `curator.yaml` from `curator/curator.example-{codex,claude}.yaml`, only
+  if none exists (runtime `codex` if installed, otherwise `claude`, or
+  `--runtime`; chat sources with `--chat-sources both|chatgpt|claude|none`)
+- the systemd units (bridge path/timer, curator timer, radar timer)
+- the Firefox native messaging host and the Omarchy widget
+
+Replaced files are backed up to `~/.local/share/polaris/install-backups/<time>/`.
+Requirements: `python3` with PyYAML (`python-yaml`), `jq` for the widget,
+`codex` or `claude` (logged in) for the curator, Firefox for the extension.
+The extension itself is installed by hand (see
+[Installing the extension](#installing-the-extension-firefox)).
+
+`monitoring.chat_sources` in `~/.config/polaris/curator.yaml` decides which
+browser chats the health check watches: `[chatgpt, claude]`, `[chatgpt]`,
+`[claude]` or `[]`. It is independent of the model runtime: with `[]` the
+curator can still use another model via `runtime: command` and process inbox
+documents, and the missing extension is not reported. Grok chats are not
+captured.
+
+From a git checkout, omarchy-backup and the machine memory
+(`~/.config/ai-agents`) are optional; the health check then shows them as
+"not set up". The install bundle brings both (see below).
+
+Running `install.sh` with options (`--yes`, `--projects`, `--backup-target`,
+`--memory-mirror`, `--storage-unit`, `--no-units`, `--no-widget`, `--no-dock`,
+`--no-backup`, `--no-memory`, …; see `install.sh --help`) or without a
+terminal skips the questions.
+
+### Updating: `polaris update`
+
+A git checkout (for example a clone of this repository) updates like an
+Omarchy plugin:
+
+```bash
+polaris update            # show changes, ask, update
+polaris update --yes      # no question (for agents)
+polaris update --check    # only look; exit 0 = update available
+```
+
+`update.sh` runs `git fetch`, fast-forward only, then `install.sh --yes` for
+what is already set up (units, widget, dock, memory), then
+`polaris-curator health`. Local commits or modified files abort the update
+(your own changes belong in a branch or pull request). If the health check
+turns red or `install.sh` fails, it goes back to the previous commit. At most
+once a day the health check shows "Update: available …". The version number
+is the extension's.
+
+If your project folders live on a drive mounted by its own systemd unit (for
+example rclone), bridge, curator and mirror start after it:
+`install.sh --storage-unit <unit>` adds drop-ins
+`<unit>.d/polaris-storage.conf` (default: `rclone-projekte.service` if it
+exists). Local folders, such as a Nextcloud sync folder, need nothing
 (`--storage-unit none`).
 
-Was sich je Stand geaendert hat, auch Nebenwirkungen von `install.sh` (neue
-Skills, strengere Pruefungen): [`CHANGELOG.md`](CHANGELOG.md).
+### Switching from the install bundle to a git checkout
 
-### Umstieg vom Paket auf den git-Checkout
-
-Wer Polaris aus dem Installationspaket eingerichtet hat, hat die Programmdateien
-unter `~/.local/share/polaris/app` und keine gemeinsame git-Historie mit dem
-Spiegel. `polaris update` und `git pull --ff-only` gehen dort nicht, auch nicht,
-wenn man den Ordner selbst unter git gestellt hat. **Achtung:** Im Spiegel fehlt
-`extras/` (omarchy-backup, Widgets `mst.omarchy-backup` und
-`mst.agent-launchers`). Zeigt `~/.local/bin/omarchy-backup` dort hinein, macht
-ein blosser Wechsel auf den Spiegel omarchy-backup kaputt. Deshalb zuerst
-`extras/` auslagern:
+An installation from the bundle keeps its program files in
+`~/.local/share/polaris/app` without a shared git history, so
+`polaris update` does not work there. **Careful:** this repository has no
+`extras/` (omarchy-backup and the widgets `mst.omarchy-backup` and
+`mst.agent-launchers`). If `~/.local/bin/omarchy-backup` points into the app
+folder, switching breaks omarchy-backup. Move `extras/` out first:
 
 ```bash
 APP=~/.local/share/polaris/app
-readlink -f ~/.local/bin/omarchy-backup          # zeigt es nach $APP/extras/...?
-# 1. extras/ an einen eigenen Ort ausserhalb des Programmordners
+readlink -f ~/.local/bin/omarchy-backup          # points into $APP/extras/...?
+# 1. move extras/ out of the program folder
 mkdir -p ~/.local/share/polaris-extras
 cp -a "$APP"/extras/. ~/.local/share/polaris-extras/
-~/.local/share/polaris-extras/omarchy-backup/install.sh   # Link neu setzen, Konfiguration bleibt
+~/.local/share/polaris-extras/omarchy-backup/install.sh   # re-links, keeps its configuration
 printf 'include ~/.local/share/polaris-extras\n' > ~/.config/omarchy-backup/paths.d/polaris-extras.conf
-omarchy-backup doctor                            # muss HEALTHY melden
-# 2. Programmordner auf den Spiegel umstellen, alten Stand behalten
+omarchy-backup doctor                            # must report HEALTHY
+# 2. switch the program folder to this repository, keep the old state
 cd "$APP"
 [ -d .git ] || git init -q
 git remote set-url origin https://github.com/mstio/polaris-connector.git 2>/dev/null \
   || git remote add origin https://github.com/mstio/polaris-connector.git
 git fetch origin
-git branch paket-alt 2>/dev/null || true         # sichert eigene Commits, falls vorhanden
-git checkout -B main origin/main --force         # ersetzt die Dateien durch den Spiegel
-# 3. neu einrichten und pruefen
-./install.sh --dry-run --yes --storage-unit none # ggf. eigene Laufwerks-Unit statt none
+git branch bundle-old 2>/dev/null || true        # keeps your own commits, if any
+git checkout -B main origin/main --force         # replaces the files with this repository
+# 3. set up again and check
+./install.sh --dry-run --yes --storage-unit none # or your own drive unit instead of none
 ./install.sh --yes --storage-unit none
 omarchy restart shell
-polaris update --check                           # "aktuell"
+polaris update --check                           # "up to date"
 ```
 
-Die Widgets selbst laufen aus Kopien unter `~/.config/omarchy/plugins/` und
-sind vom Umstieg nicht betroffen. Ihre Quellen unter `polaris-extras/` braucht
-man nur fuer eine Neuinstallation. Danach genuegt `polaris update`. So hat ein
-Nutzer am 2026-10-24 vom Paket des 15.10. auf 0.4.4 gewechselt.
+The widgets run from copies in `~/.config/omarchy/plugins/` and are not
+affected. Their sources under `polaris-extras/` are only needed for a fresh
+install. From then on `polaris update` is enough.
 
-### Weitergabe ohne git (Installationspaket)
+## Core: project memory
 
-`./make-bundle.sh` baut `dist/polaris-setup-<Version>.tar.gz` mit dem ganzen
-Polaris (Nutzervorgabe 2026-10-08: jede Aenderung an Polaris kommt ins Paket):
+### Project folders
 
-- Code, neueste signierte `.xpi` und `install.sh`; ohne Tests, Experimente und lokale Daten
-- `extras/omarchy-backup/` und `extras/mst.omarchy-backup/`: CLI und Widget, jeweils der committete Stand der eigenen Repos (`OB_REPO`, `OB_PLUGIN`)
-- `memory/`: `memlint.py` und eine leere Vorlage des Maschinengedaechtnisses, nie dessen Inhalte. Der Bau bricht ab, wenn `memory/tools/memlint.py` von `~/.config/ai-agents/tools/memlint.py` abweicht.
+Polaris works on ordinary folders below one or more **project roots**. Each
+project folder gets:
 
-Vor dem Packen prueft `scripts/privacy-check.py` alle Dateien auf private Angaben:
-den eigenen Home-Pfad, die git-E-Mail, die Namen der Projektordner unter den
-Polaris-Wurzeln und Begriffe aus `~/.config/polaris/bundle-deny.txt`. Bei einem
-Treffer wird nichts gebaut. Allgemeine Ordnernamen stehen in
-`~/.config/polaris/bundle-allow.txt`; beide Listen bleiben lokal.
+```
+<project>/
+  raw/chatgpt/messages/<message-id>.json         archived turns (browser capture, export)
+  raw/chatgpt/conversations/<conversation-id>.json
+  raw/claude/...                                 the same for Claude
+  inbox/{documents,notes,mail}/                  drop documents and mails here
+  knowledge.md  decisions.md  open-loops.md      curated knowledge
+  dokumente-index.md                             index of processed documents
+  .polaris/                                      curator state, journal, backups
+```
 
-Geschuetzte Ordner: Aus einem geschuetzten Ordner darf nichts veroeffentlicht
-werden, auch nicht sein Name. Geschuetzt ist ein Projektordner mit der leeren
-Datei `.polaris-protected` oder ein Ordner in `~/.config/polaris/protected.txt`
-(eine Zeile je Ordner, `~` erlaubt). Gesperrt sind dann:
-
-- sein Name (exakte Schreibweise, ganzes Wort, auch in Dateipfaden) und sein Pfad
-- jede Datei daraus byte-gleich, auch PDF, Office und Bilder
-- jede Textzeile mit Inhalt (ab 4 Buchstaben/Ziffern) als ganze Zeile und jede
-  Folge von 5 Woertern daraus (ab 25 Zeichen) auch mitten in anderem Text
-
-Ausgenommen sind nur Zeilen, die Polaris in jedes Projekt schreibt
-(Standard-Ueberschriften, Curator-Metazeile, `polaris-`-Kommentare, JSON-Geruest
-mit Polaris-Schluesseln). Treffer nennen nur Datei und Zeile, nie den Text;
-`bundle-allow.txt` hebt den Schutz nicht auf. Gelesen wird nur bei der Pruefung,
-Fingerabdruecke werden nicht gespeichert. Grenze: Umformuliertes oder
-Uebersetztes erkennt keine mechanische Pruefung.
-
-Dieselbe Pruefung laeuft in `scripts/publish-public.sh` und als `pre-push`-Hook
-im Spiegel-Klon (`scripts/public-pre-push`, von `publish-public.sh` als Symlink
-eingerichtet), also auch bei einem direkten `git push` dorthin. Der Hook prueft
-zusaetzlich Autor, Committer und Nachricht jedes Commits; `publish-public.sh`
-committet deshalb mit der GitHub-noreply-Adresse statt der eigenen Mail.
-
-Der Empfaenger braucht weder git noch GitHub-Zugang:
+Raw data is append-only and never summarised; the curated files are written
+by the curator and stay readable and editable.
 
 ```bash
-unzip polaris-setup-<Version>.zip          # oder: tar -xzf polaris-setup-<Version>.tar.gz
-bash polaris-setup-<Version>/install.sh    # gefuehrte Einrichtung
+polaris roots                     # roots with number of project folders
+polaris roots add <folder>        # folder that contains the project folders
+polaris roots remove <folder>     # refused while mappings point into it (--force)
 ```
 
-Die gefuehrte Einrichtung fragt nacheinander:
-1. den Projektordner
-2. das Curator-Modell (codex, claude oder command)
-3. Hintergrunddienste und Widgets
-4. omarchy-backup mit Ziel-Ordner
-5. das Maschinengedaechtnis mit optionalem Spiegel-Ordner
+On first start only `~/Projekte` is added automatically, if it exists. A root
+does not have to be a cloud drive; any local or mounted folder works. Keep
+code and program state outside the project roots so that no git repository or
+bridge state ends up in a cloud sync. The health check (line "project
+folders") checks every root: a missing root or missing mapped project folders
+(typically a dropped mount) is an error; for rclone mounts it also watches the
+upload backlog.
 
-Danach zeigt sie eine Zusammenfassung und richtet erst nach Bestaetigung ein.
-Jeder Lauf schreibt ein Protokoll nach `~/.local/state/polaris/install-<Zeit>.log`. Das
-Maschinengedaechtnis entsteht als Erstes, samt Links fuer Claude Code, Codex usw. Dazu
-kommt `handoff/polaris.md` mit Stand und offenen Punkten. Bricht die Installation ab,
-nennt sie Schritt, Grund, Protokoll und den Leitfaden
-[`docs/AGENTEN-LEITFADEN.md`](docs/AGENTEN-LEITFADEN.md). Mit diesen Angaben kann ein
-lokaler AI-Agent nach den Prinzipien des Systems selbststaendig weitermachen.
-Den Leitfaden bei jeder Aenderung an Polaris mitpflegen.
+### Project mapping
 
-Ohne Terminal oder mit Optionen (`--yes`, `--projects`, `--backup-target`,
-`--memory-mirror` usw., siehe `install.sh --help`) laeuft sie ohne Fragen.
+Chat projects are mapped to project folders automatically, in this order:
+known mapping → exact name → normalised name (case, `_`/`-`, numbering
+prefixes) → fuzzy match only when it is unambiguous. When unsure, the
+messages wait as **pending**; Polaris never guesses.
 
-Aus einem Paket gestartet, kopiert `install.sh` die Programmdateien nach
-`~/.local/share/polaris/app` und installiert von dort (Update: neues Paket
-genauso ausfuehren, die alte Fassung landet unter
-`~/.local/share/polaris/install-backups/`). Ist omarchy-backup eingerichtet,
-traegt `install.sh` den Programmordner in dessen `paths.d/` ein (`repo` fuer
-einen git-Checkout, `include` fuer den App-Ordner), sofern er dort noch nicht
-erfasst ist. Aus dem Paket richtet es ausserdem omarchy-backup ein: Link,
-Standardkonfiguration und Widget. Mit Ziel-Ordner schaltet es auch die
-taeglichen Snapshots ein, die Baseline setzt man selbst.
+```bash
+polaris projects                          # known mappings
+polaris pending                           # unknown projects with candidates (informational only)
+polaris map <project-id> <local-path>     # also re-processes waiting messages of that project
+polaris unmap <project-id>
+polaris status                            # inbox size, events, projects, conversations, last run
+```
 
-Zum Maschinengedaechtnis:
-- `install.sh` legt `~/.config/ai-agents` aus der Vorlage an, oder holt es aus dem Spiegel zurueck, wenn dort schon eines liegt.
-- Es traegt das Gedaechtnis ins Backup ein und richtet `polaris-memory-mirror` mit Timer ein (alle 30 min).
-- Ein vorhandenes Gedaechtnis bleibt unveraendert, nur `memlint.py` wird aktualisiert.
-- `--no-backup` bzw. `--no-memory` schalten das ab.
+The target must be inside a configured project root; anything else is refused
+(protection against wrong assignments and path traversal).
 
-**Spiegel des Gedaechtnisses** (`memory_mirror:` in `~/.config/polaris/config.yaml`):
-- Gearbeitet wird immer lokal. Der Spiegel ist eine einseitige Kopie, z. B. nach `~/Projekte/Polaris/Maschinengedaechtnis`.
-- Geloeschte oder geaenderte Dateien bleiben dort unter `.alt/<Datum>/`.
-- Ist das Laufwerk nicht eingehaengt, endet der Lauf mit 75 und legt nichts unter dem Mountpunkt an. Der naechste Lauf holt nach.
-- Der Health Check wird gelb, wenn der letzte erfolgreiche Lauf aelter als 2 Tage ist.
+### Curator
 
-Die Bewertung einer austauschbaren Agent-Runtime steht in
-[`docs/agent-runtime-evaluation.md`](docs/agent-runtime-evaluation.md), die
-Entscheidung in [`docs/adr/001-agent-runtime.md`](docs/adr/001-agent-runtime.md).
-Der dazugehörige isolierte, nicht produktive PoC liegt unter
-[`experiments/agent-runtime-poc/`](experiments/agent-runtime-poc/README.md).
+`polaris-curator` reads new raw turns and inbox documents per project, asks
+the configured model runtime for changes and merges them atomically into
+`knowledge.md`, `decisions.md` and `open-loops.md`, with a source reference
+for every entry. A systemd timer runs it; the widget can start it by hand.
+Classification rules, budgets, journal, compaction, retraction and document
+handling are described in [`curator/README.md`](curator/README.md) (German).
 
-## Architektur
+## Module: browser capture (ChatGPT and Claude)
+
+Archives selected ChatGPT and Claude **project** conversations locally, turn
+by turn, as raw data. No summary, no AI, no cloud infrastructure.
 
 ```
-ChatGPT (chatgpt.com) / Claude (claude.ai), jeweils in Firefox
-   |  ChatGPT: rohes Chat-Abbild aus der Web-Schnittstelle (chatgpt_api.js),
-   |           Seitenaufbau (extractor.js) nur noch als Rueckfall
-   |  Claude:  JSON-Schnittstelle der Web-App (claude.js)
+ChatGPT (chatgpt.com) / Claude (claude.ai), in Firefox
+   |  ChatGPT: raw conversation snapshot from the web app API (chatgpt_api.js),
+   |           page DOM (extractor.js) only as a fallback
+   |  Claude:  JSON API of the web app (claude.js)
    v
 extension/  (Firefox WebExtension, MV3)
    |
-   |  Hauptweg (seit v0.1.2): Native Messaging -> bridge/bin/polaris-native-host
-   |     Firefox startet den Host nur bei Bedarf (~50 ms, ~14 MB), der Port
-   |     schliesst nach 30 s Leerlauf. Kein Download, kein Downloads-Ordner.
-   |  Rueckfall (Host nicht registriert/erreichbar): downloads.download()
-   |     -> blob: URL (Firefox lehnt data: URLs dafuer ab)
+   |  main path: native messaging -> bridge/bin/polaris-native-host
+   |     Firefox starts the host on demand (~50 ms, ~14 MB); the port
+   |     closes after 30 s idle. No download, no downloads folder.
+   |  fallback (host not registered/reachable): downloads.download()
+   |     -> blob: URL (Firefox refuses data: URLs for this)
    v
-~/Downloads/polaris-inbox/*.json      (Bridge-Inbox; der Host schreibt atomar
-   |                                   hierher und verarbeitet sofort)
-   |  Rueckfall-Downloads: systemd --user path unit (polaris-bridge.path),
-   |  Sicherheitsnetz alle 10 min: polaris-bridge.timer
+~/Downloads/polaris-inbox/*.json      (bridge inbox; the host writes atomically
+   |                                   and processes immediately)
+   |  fallback downloads: systemd --user path unit (polaris-bridge.path),
+   |  safety net every 10 min: polaris-bridge.timer
    v
 polaris-bridge.service  ->  `polaris process`
    |
    v
 bridge/polaris/  (Python, stdlib + PyYAML)
-   - schema.py    Validierung
-   - snapshot.py  Chat-Abbild / Datenexport -> Turns (einzige Interpretation)
-   - mapping.py   Projekt-ID (ChatGPT/Claude) -> lokaler Projektordner (persistiert)
-   - matching.py  exakt / normalisiert / fuzzy
-   - storage.py   atomare, append-only Ablage, Konfliktpruefung
+   - schema.py    validation
+   - snapshot.py  conversation snapshot / data export -> turns (the only interpretation)
+   - mapping.py   project ID (ChatGPT/Claude) -> local project folder (persisted)
+   - matching.py  exact / normalised / fuzzy
+   - storage.py   atomic, append-only storage, conflict checks
    v
-<lokales Projekt>/raw/<chatgpt|claude>/messages/<message-id>.json
-<lokales Projekt>/raw/<chatgpt|claude>/conversations/<conversation-id>.json
+<project>/raw/<chatgpt|claude>/messages/<message-id>.json
+<project>/raw/<chatgpt|claude>/conversations/<conversation-id>.json
 ```
 
-Komponenten sind bewusst getrennt: Die Extension kennt keine Projektpfade und
-interpretiert keine Chats, die Bridge kennt kein ChatGPT-DOM.
+The parts are deliberately separate: the extension knows no project paths and
+does not interpret chats; the bridge knows no ChatGPT DOM.
 
-## Installationspfade
+### Installing the extension (Firefox)
 
-| Was | Pfad |
-|---|---|
-| Repo (Code) | `~/Projects/polaris-chatgpt-connector/` |
-| Browser Extension | `~/Projects/polaris-chatgpt-connector/extension/` |
-| Bridge (Python) | `~/Projects/polaris-chatgpt-connector/bridge/` |
-| CLI-Wrapper | `~/.local/bin/polaris` (Symlink auf `bridge/bin/polaris`) |
-| Config (project_roots) | `~/.config/polaris/config.yaml` |
-| Projekt-Mappings | `~/.config/polaris/projects.yaml` |
-| Browser-Inbox | `~/Downloads/polaris-inbox/` |
-| Pending/Processed/Failed | `~/.local/share/polaris/{pending,processed,failed}/` |
-| Log | `~/.local/state/polaris/polaris.log` |
-| systemd Units | `~/.config/systemd/user/polaris-bridge.{service,path,timer}` (Kopien aus `systemd/`; Curator-Units siehe `curator/README.md`) |
-| Erkannter Projekt-Root | `~/Projekte` (rclone-Mount von Google Drive "Projekte", siehe `~/.config/systemd/user/rclone-projekte.service`) |
+The extension is registered at addons.mozilla.org (AMO) as an **unlisted**
+add-on (add-on ID 3070992, extension ID
+`polaris-chatgpt-connector@mstarchy.local`) and signed there. A signed `.xpi`
+installs permanently, also on release Firefox. The newest one is attached to
+[the latest release](https://github.com/mstio/polaris-connector/releases/latest):
+download it and drag it into a Firefox window.
 
-`project_roots` muss kein Drive-Mount sein - jeder lokale oder anders
-eingehaengte Ordner geht. Verwalten ohne Handarbeit in der YAML-Datei:
-
-```bash
-polaris roots                     # Eintraege mit Anzahl Projektordner
-polaris roots add <Ordner>        # Ordner, in dem die Projektordner liegen
-polaris roots remove <Ordner>     # verweigert, solange Zuordnungen hineinzeigen (--force)
-```
-
-Beim ersten Start wird nur `~/Projekte` automatisch eingetragen, sofern es
-existiert. Das Extension-Popup bietet die Unterordner aller Eintraege zur
-Zuordnung an; die Extension selbst braucht dafuer keine Aenderung. Der Health
-Check (Zeile „Projektordner“) prueft jeden Eintrag: fehlt er oder fehlen
-zugeordnete Projektordner darunter (typisch: Mount abgefallen), ist das ein
-Fehler; nur bei rclone-Mounts zusaetzlich der Upload-Stau. Die Abhaengigkeit
-von `rclone-projekte.service` in den Units ist `Wants=`/`After=` und schadet
-ohne diese Unit nicht.
-
-`~/Projekte` ist ausschliesslich fuer die eigentlichen Projektordner
-(Rohdaten) gedacht. Der Code selbst liegt bewusst getrennt davon unter
-`~/Projects` (lokal, nicht ueber Google Drive synchronisiert), damit kein
-Git-Repo / keine Bridge-Zustandsdateien versehentlich in den Drive-Sync
-geraten.
-
-Es existiert bereits ein **anderes** Projekt namens "Polaris" unter
-`~/Projekte/Polaris` (leere Test-Verzeichnisse eines Knowledge-Extraction-
-Experiments). Das ist nicht dasselbe System wie dieser Connector und wurde
-nicht angefasst.
-
-## Extension installieren (Firefox)
-
-Die Extension ist bei addons.mozilla.org (AMO) als **unlisted** Add-on
-registriert (Add-on-ID 3070992, Extension-ID
-`polaris-chatgpt-connector@mstarchy.local`) und wird dort signiert. Eine
-signierte `.xpi` installiert sich dauerhaft, auch auf Release-Firefox.
-
-### Oeffentlicher Spiegel
-
-Dieses Repo bleibt privat (volle Historie). Freigegebene Staende gehen per
-`scripts/publish-public.sh [<ref>] [--push]` als je ein Commit in den
-oeffentlichen Spiegel (Arbeitskopie `~/Projects/polaris-public`), ohne
-Historie und ohne Binaerpakete; vorher laeuft dieselbe Privatsphaere-Pruefung.
-Tests und Kommentare verwenden deshalb nur erfundene Projektnamen (Kunde-A,
-Musterfirma, ABC, Falke). Pull Requests aus dem Spiegel lassen sich per
-`git format-patch | git am -3` uebernehmen (siehe Kopf des Skripts).
-Anleitung fuer Beitragende und deren KI-Agenten: `CONTRIBUTING.md`.
-
-### Neue Version ausliefern
-
-1. Version in `extension/manifest.json` erhoehen.
-2. ZIP aus dem Inhalt von `extension/` bauen (`manifest.json` muss im
-   ZIP-Wurzelverzeichnis liegen), z. B.
-   `(cd extension && zip -r ../polaris-chatgpt-connector-v<X.Y.Z>.zip .)`.
-3. Bei AMO unter https://addons.mozilla.org/developers/addon/3070992/versions
-   als neue **unlisted** Version hochladen; AMO signiert automatisch.
-4. Signierte `.xpi` herunterladen und in Firefox installieren (Drag&Drop oder
-   `about:addons` -> Zahnrad -> „Add-on aus Datei installieren“).
-5. Die signierte `.xpi` als `dist/polaris-chatgpt-connector-<X.Y.Z>-signed.xpi`
-   committen (alte entfernen), damit sie nach einer Neuinstallation ohne
-   AMO-Login bereitliegt; `install.sh` zeigt auf die neueste.
-6. `scripts/publish-public.sh --push`: prueft die entpackte `.xpi` (Version,
-   ID, Signatur, Privatsphaere), legt im oeffentlichen Spiegel das Release
-   `v<X.Y.Z>` mit der `.xpi` an und aktualisiert dort `updates.json`.
-
-Seit 0.4.2 steht im Manifest eine `update_url`
+Since 0.4.2 the manifest has an `update_url`
 (`raw.githubusercontent.com/mstio/polaris-connector/main/updates.json`):
-installierte Kopien, auch bei Dritten, fragen etwa einmal am Tag nach und
-aktualisieren sich selbst. 0.4.1 und aelter kennen sie noch nicht und
-muessen einmal von Hand auf 0.4.2 gebracht werden. Die `update_url` nie
-aendern: alte Installationen fragen sonst ins Leere. Erteilte
-Berechtigungen bleiben an der Extension-ID haengen und ueberstehen Updates.
+installed copies check about once a day and update themselves. 0.4.1 and
+older must be brought to 0.4.2 once by hand. Never change the `update_url`,
+or old installations ask into the void. Granted permissions stay with the
+extension ID and survive updates.
 
-### Berechtigung fuer chatgpt.com / claude.ai
+**Permissions for chatgpt.com / claude.ai:** Firefox treats `host_permissions`
+of MV3 extensions as optional. Without them the extension only runs after a
+click on its icon. Click "allow access permanently" in the popup, or grant
+both sites in `about:addons` → Polaris → Permissions.
 
-Firefox behandelt `host_permissions` von MV3-Extensions als optional. Ohne
-Erteilung laeuft die Extension nur nach Klick aufs Symbol. Im Popup
-„Zugriff dauerhaft erlauben“ klicken oder in `about:addons` -> Polaris ->
-Berechtigungen beide Seiten freigeben.
-
-### Entwicklung: temporaer laden
-
-Zum Testen eines ungesignierten Stands: `about:debugging#/runtime/this-firefox`
--> „Temporäres Add-on laden…“ -> `extension/manifest.json`. Der temporaere
-Stand ueberlagert die installierte Version bis zum naechsten Firefox-Neustart;
-danach laeuft wieder die signierte Version (der Health Check zeigt die
-Ueberlagerung gelb an).
-
-### Native Messaging einrichten (seit v0.1.2)
+**Native messaging:**
 
 ```bash
-bridge/install-native-host.sh           # registriert polaris_bridge bei Firefox
-bridge/install-native-host.sh --remove  # Registrierung entfernen
+bridge/install-native-host.sh           # registers polaris_bridge with Firefox
+bridge/install-native-host.sh --remove  # removes the registration
 ```
 
-Schreibt `~/.mozilla/native-messaging-hosts/polaris_bridge.json` (verweist
-auf `bridge/bin/polaris-native-host` in diesem Repo). Firefox sucht dort auch,
-wenn das Profil unter `~/.config/mozilla/` liegt. Das Skript legt `~/.mozilla`
-bewusst nicht selbst an. Ohne Registrierung funktioniert die Extension
-unveraendert ueber Downloads. Protokoll und Verhalten: `bridge/polaris/native_host.py`.
+This writes `~/.mozilla/native-messaging-hosts/polaris_bridge.json` (pointing
+to `bridge/bin/polaris-native-host`). Firefox also looks there when the
+profile lives under `~/.config/mozilla/`. The script does not create
+`~/.mozilla` itself, so start Firefox once first. Without the registration the
+extension keeps working through downloads. Protocol and behaviour:
+`bridge/polaris/native_host.py`.
 
-Die Extension merkt sich pro Unterhaltung, welche Nachrichten bereits
-uebergeben wurden (`storage.local`, nur IDs, max. 500 Unterhaltungen);
-eine Rueckkehr in eine Unterhaltung loest daher keinen erneuten Export aus.
+The extension remembers per conversation which messages it already handed
+over (`storage.local`, IDs only, at most 500 conversations), so returning to a
+conversation does not export again.
 
-### Luecken aus dem offiziellen ChatGPT-Export schliessen
+**Development: loading temporarily.** To test an unsigned state:
+`about:debugging#/runtime/this-firefox` → "Load Temporary Add-on…" →
+`extension/manifest.json`. It overrides the installed version until the next
+Firefox restart; the health check shows the override in yellow.
 
-Die Extension archiviert nur Unterhaltungen, die im Browser geoeffnet werden.
-Fehlendes (z. B. nach einem Ausfall) laesst sich aus dem offiziellen Export
-nachholen: ChatGPT -> Einstellungen -> Datenkontrollen -> Daten exportieren,
-ZIP aus der Mail herunterladen, dann:
+### Turning sync on
+
+1. Open a ChatGPT chat that belongs to a ChatGPT project.
+2. Click the extension icon in the toolbar.
+3. The detected project name appears. Switch "Sync project" on. For new
+   Claude projects (and ChatGPT projects that cannot be mapped unambiguously)
+   pick the target under "storage folder" and click "assign".
+4. From now on new, finished turns of this project are exported
+   automatically. Single chats can be left out with "Exclude this chat".
+5. "Sync now" exports by hand (fallback, for example right after enabling,
+   for messages already in the current chat).
+
+New projects start with sync off.
+
+### ChatGPT via the web app API (since 0.4.0)
+
+The extension reads ChatGPT conversations through the web app's own API
+(`extension/chatgpt_api.js`: `/api/auth/session` for the session token, then
+`/backend-api/conversation/<id>`) and passes the **raw** JSON to the bridge
+as a snapshot (native host `export-snapshot`, otherwise a snapshot file in
+the inbox). It interprets nothing. Only the bridge turns it into turns
+(`bridge/polaris/snapshot.py`), with the same function as for the official
+data export, which has the same format:
+
+- The project comes from the provider data (`gizmo_id`); the page's hint
+  (project/chat from the address) is only cross-checked. If they differ,
+  nothing is stored. Chats without a project are never archived.
+- A turn is a user message, or everything between two user messages
+  (assistant, tool steps, reasoning); its ID is the earliest message,
+  `member_ids` lists all. If a part is already archived under another ID
+  (for example from the old DOM capture), that ID wins: no duplicates.
+- A last answer still in progress (tool step, `in_progress`,
+  `end_turn=false`) waits for the next snapshot. The extension polls every
+  20 s (visible tab only) and sends only when `update_time` changed.
+
+Why: up to 0.3.0, DOM capture, API mode and export import decided separately
+what a turn is, which ID it has and when it is finished, which caused mixed
+up projects, duplicates and truncated answers. The DOM is now read only when
+the API does not answer (the popup shows why). That fallback is guarded
+against stale page content (no export without a chat ID, snapshot on chat
+switch, text keys for turns without ID, last answer only after 8 s without
+change) and also sends `member_ids`. It can be switched off in the popup.
+
+### Claude (since 0.2.0)
+
+The same extension exports Claude project conversations (`extension/claude.js`).
+It reads the JSON API the Claude web app loads itself
+(`/api/organizations/<org>/chat_conversations/<id>?tree=True...`): only the
+current branch, only text (no reasoning, no tool calls), file names from
+`attachments`/`files`. Project IDs look like `claude-p-<uuid>`, storage is
+`<project>/raw/claude/`. Claude project names rarely match folder names, so
+new Claude projects first wait in the queue (`polaris pending`). Assign them
+in the popup under "storage folder" (choices come from the project roots via
+the native host; waiting messages are processed immediately) or with
+`polaris map claude-p-<uuid> <folder>`. `suggested_folder_for_claude` in
+`~/.config/polaris/config.yaml` sets the suggestion for new Claude projects
+(never applied automatically). Enable sync per project in the popup as for
+ChatGPT; Firefox must have the claude.ai permission.
+
+### Memory guard for ChatGPT and Claude tabs (since 0.4.4)
+
+ChatGPT tabs have grown to 20–26 GB (RAM + swap), after which systemd-oomd
+killed all of Firefox. Firefox gives extensions no access to a tab's memory,
+so the native host measures it (`bridge/polaris/tab_memory.py`): as a child
+of the Firefox main process it reads the tab processes from `/proc` and
+counts VmRSS + VmSwap of the largest.
+
+- `background.js` asks every minute (`alarms`), only while a ChatGPT or
+  Claude tab is open.
+- From **4 GiB** a desktop notification (normal), from **8 GiB** urgent;
+  repeated only on a higher level, another process, or every 10 min while
+  critical (state: `~/.local/state/polaris/tab-memory.json`).
+- `memory_banner.js` shows a bar in ChatGPT and Claude tabs with the size and
+  "press F5 (reload)"; once dismissed it stays hidden until the level rises.
+- `/proc` does not tell which process belongs to which page, so the message
+  says "probably". No automatic reload (drafts and running answers would be
+  lost).
+- Cost: one host start (~60 ms CPU) per minute, only with an open tab.
+
+### Bridge and systemd
 
 ```bash
-polaris import-export ~/Downloads/<export>.zip --since 2026-09-14 --dry-run   # anzeigen
-polaris import-export ~/Downloads/<export>.zip --since 2026-09-14             # importieren
+polaris process        # processes the inbox and all unresolved pending events once
 ```
 
-Nur Projekt-Unterhaltungen (`gizmo_id` = `g-p-...`), nur der aktuelle
-Gespraechsstrang, bereits vorhandene Nachrichten werden uebersprungen.
-Projekte ohne Mapping werden gemeldet (`polaris map <id> <Ordner>`).
-Der Curator verarbeitet den Nachschub danach wie gewohnt tageweise.
-
-### Aeltere Chats lesbar ablegen, ohne Kuration (seit 2026-10-02)
-
-Fuer grosse Mengen alter Chats ist Kuration zu teuer und verzerrt die
-Gewichtung. `archive-export` legt sie stattdessen als Markdown ab - nichts
-landet in `raw/`, der Curator wertet sie nicht aus:
-
-```bash
-polaris archive-export ~/Downloads/<entpackter-export>/ --since 2025-10-02 --min-turns 6 \
-    --project Kunde-A --project Kunde-B --dry-run
-```
-
-Ergebnis: `<Projekt>/ChatGPT-Archiv/<JJJJ-MM-TT> <Titel>.md` (Frontmatter mit
-Chat-ID, Zeitraum, `kuratiert: nein`; Verlauf als „Ich“/„ChatGPT“) und
-`ChatGPT-Archiv/Dateien/<Chat>/<Originalname>`. Abzweigungen („Teilgespraech“)
-verweisen fuer den uebernommenen Verlauf auf den Ausgangs-Chat. `.pst/.mbox/.zip`
-werden nur vermerkt; hochgeladene Dateien, die der Export nicht enthaelt,
-werden auf eine gleichnamige Datei im Projektordner verlinkt, sonst vermerkt.
-Wiederholbar (bereits abgelegte Chat-IDs werden uebersprungen). Einzelne
-Chats lassen sich spaeter gezielt kuratieren, indem man sie in `inbox/` legt.
-
-### Claude (claude.ai, seit v0.2.0)
-
-Dieselbe Extension exportiert auch Claude-Projekt-Unterhaltungen
-(`extension/claude.js`). Gelesen wird nicht der Seitenaufbau, sondern die
-JSON-Schnittstelle, die die Claude-Web-App selbst laedt
-(`/api/organizations/<org>/chat_conversations/<id>?tree=True...`): nur der
-aktuelle Gespraechsstrang, nur Textinhalt (keine Denkprozesse, keine
-Werkzeugaufrufe), Dateinamen aus `attachments`/`files`. Projekt-IDs heissen
-`claude-p-<uuid>`, Ablage unter `<Projekt>/raw/claude/`. Claude-Projektnamen
-passen selten zum Ordnernamen - neue Claude-Projekte landen daher zunaechst
-in der Warteschlange (`polaris pending`). Zugeordnet wird im Popup unter
-„Ablageordner“ (Auswahl nur aus Ordnern unter den `project_roots`, geliefert
-vom Native Host; wartende Nachrichten werden sofort nachverarbeitet) oder per
-`polaris map claude-p-<uuid> <Ordner>`. `suggested_folder_for_claude` in
-`~/.config/polaris/config.yaml` legt den Vorschlag fuer neue Claude-Projekte
-fest (wird nie automatisch angewendet). Dieselbe Auswahl aendert auch
-ChatGPT-Zuordnungen. Sync pro Projekt wie bei ChatGPT im Popup einschalten; die
-Berechtigung fuer claude.ai muss in Firefox erteilt sein (Popup-Hinweis).
-
-### ChatGPT als Chat-Abbild ueber die Web-Schnittstelle (seit v0.4.0)
-
-Die Extension liest ChatGPT-Unterhaltungen standardmaessig ueber die
-Schnittstelle der Web-App (`extension/chatgpt_api.js`: `/api/auth/session`
-fuer das Sitzungstoken, dann `/backend-api/conversation/<id>`) und reicht das
-**rohe** JSON als Chat-Abbild an die Bridge weiter (Native Host
-`export-snapshot`, sonst Abbild-Datei im Inbox-Ordner). Sie interpretiert
-nichts. Nur die Bridge bildet daraus Turns (`bridge/polaris/snapshot.py`) -
-mit derselben Funktion wie fuer den offiziellen Datenexport, der dasselbe
-Format hat:
-
-- Projekt aus den Anbieterdaten (`gizmo_id`); der Hinweis der Seite
-  (Projekt/Chat aus der Adresse) wird nur gegengeprueft - weicht er ab, wird
-  nichts uebernommen. Chats ohne Projekt werden nie archiviert.
-- Turn = Nutzer-Nachricht bzw. alles zwischen zwei Nutzer-Nachrichten
-  (Assistent, Werkzeugschritte, Denkprozesse); ID = frueheste Nachricht,
-  `member_ids` = alle. Ist ein Bestandteil im Chat schon archiviert (z. B.
-  frueher per DOM unter einer anderen ID), gilt dessen ID - keine Dubletten.
-- Eine laufende letzte Antwort (Werkzeugschritt, `in_progress`,
-  `end_turn=false`) wartet auf das naechste Abbild. Die Extension fragt alle
-  20 s nach (nur sichtbarer Tab) und sendet nur bei geaenderter `update_time`.
-
-Warum (Vorfall 2026-09-29): bis 0.3.0 entschieden DOM-Erfassung,
-Schnittstellen-Modus und Export-Import getrennt, was ein Turn ist, welche ID er
-hat und wann er fertig ist - Quelle von Vermischungen, Dubletten und
-abgeschnittenen Antworten. Der Seitenaufbau (DOM) wird nur noch gelesen, wenn
-die Schnittstelle nicht antwortet (Popup zeigt den Grund); dieser Rueckfall ist
-gegen veralteten Seiteninhalt abgesichert (kein Export ohne Chat-ID, Abbild
-beim Chatwechsel, Text-Schluessel fuer Turns ohne ID, letzte Antwort erst nach
-8 s ohne Aenderung) und schickt ebenfalls `member_ids`. Abschaltbar im Popup
-(„ChatGPT über Schnittstelle lesen“).
-
-### Speicherwaechter fuer ChatGPT- und Claude-Tabs (seit v0.4.4)
-
-Anlass: Am 22. und 23.10.2026 wuchs ein ChatGPT-Tab auf 20-26 GB (RAM + Swap);
-systemd-oomd beendete daraufhin ganz Firefox mit allen Tabs. Firefox gibt
-Erweiterungen keinen Zugriff auf den Speicher eines Tabs, deshalb misst der
-Native Host (`bridge/polaris/tab_memory.py`): Er ist Kind des
-Firefox-Hauptprozesses und liest dessen Tab-Prozesse (unter dem Forkserver)
-aus `/proc`, gezaehlt wird VmRSS + VmSwap des groessten.
-
-- `background.js` fragt jede Minute (`alarms`), aber nur solange ein
-  ChatGPT- oder Claude-Tab offen ist (`tab-memory` an den Host).
-- Ab **4 GiB** Desktop-Meldung (normal), ab **8 GiB** dringend; erneut nur bei
-  hoeherer Stufe, anderem Prozess oder alle 10 min, solange kritisch
-  (Zustand: `~/.local/state/polaris/tab-memory.json`).
-- `memory_banner.js` zeigt in ChatGPT- und Claude-Tabs eine Hinweisleiste mit
-  Groesse und „F5 druecken (Neu laden)“; ausgeblendet bleibt sie aus, bis die
-  Stufe steigt.
-- Welcher Prozess zu welcher Seite gehoert, verraet `/proc` nicht; die
-  Meldung sagt deshalb „vermutlich“. Kein automatisches Neuladen (Entwuerfe
-  und laufende Antworten gingen verloren).
-- Kosten: ein Host-Start (~60 ms CPU) pro Minute, nur bei offenem Tab.
-
-## Polaris Sync aktivieren
-
-1. Einen ChatGPT-Chat oeffnen, der zu einem ChatGPT-Project gehoert.
-2. Extension-Icon in der Toolbar klicken.
-3. Erkannter Projektname erscheint. "Sync project" auf ON stellen. Bei
-   neuen Claude-Projekten (und nicht eindeutig zuordenbaren ChatGPT-Projekten)
-   unter „Ablageordner“ den Zielordner waehlen und „Zuordnen“ klicken.
-4. Ab jetzt werden neue, abgeschlossene Turns in diesem Projekt automatisch
-   exportiert. Einzelne Chats koennen ueber "Exclude this chat" ausgenommen
-   werden.
-5. "Sync now" exportiert manuell (Fallback, z.B. direkt nach dem
-   Aktivieren fuer bereits vorhandene Nachrichten im aktuellen Chat).
-
-Neue Projects sind per Default `Sync project = OFF`.
-
-## Bridge manuell starten
-
-```bash
-polaris process
-```
-
-Verarbeitet einmalig alle Dateien in `~/Downloads/polaris-inbox/` sowie
-alle bislang unaufgeloesten Pending-Events.
-
-## systemd-Automatik
-
-Einrichten (Units liegen im Repo unter `systemd/`):
+`install.sh` installs the units; by hand:
 
 ```bash
 cp systemd/polaris-bridge.{service,path,timer} ~/.config/systemd/user/
@@ -515,194 +411,339 @@ systemctl --user daemon-reload
 systemctl --user enable --now polaris-bridge.path polaris-bridge.timer
 ```
 
-Neue Datei in der Inbox -> `polaris-bridge.path` -> startet
-`polaris-bridge.service` (oneshot) -> `polaris process` -> beendet sich.
-Kein dauerhaft laufender Poll-Prozess. `polaris-bridge.timer` startet
-denselben Dienst zusaetzlich 5 min nach dem Boot und dann alle 10 min als
-Sicherheitsnetz fuer liegengebliebene Dateien (seit 2026-09-29). Der Dienst
-hat `StartLimitIntervalSec=0`, damit viele Inbox-Dateien ihn nicht
-stilllegen.
+A new inbox file → `polaris-bridge.path` → `polaris-bridge.service`
+(oneshot) → `polaris process` → exits. No permanent polling process.
+`polaris-bridge.timer` also starts the service 5 min after boot and every
+10 min as a safety net. The service has `StartLimitIntervalSec=0` so that
+many inbox files do not disable it. The log
+(`~/.local/state/polaris/polaris.log`) contains technical metadata only (IDs,
+roles, mapping, target path, status), never chat content.
 
-## `polaris status`
+### Troubleshooting
+
+- File stays in `~/Downloads/polaris-inbox/`: the extension download failed or
+  the bridge has not run (`polaris process`,
+  `systemctl --user status polaris-bridge.path`).
+- File ends up in `~/.local/share/polaris/failed/`: invalid JSON or schema;
+  the reason is in the log.
+- File ends up in `~/.local/share/polaris/pending/<project-id>/`: the project
+  could not be mapped safely. Use `polaris pending` and `polaris map`.
+- Reason `dom-after-no-project`: ChatGPT last reported this chat as having no
+  project; a fallback capture from the page (project only from a possibly
+  stale address) is refused for 7 days. Reload the chat once it is in a
+  project again.
+- Conflicts (`polaris conflicts`): one by one with
+  `--resolve <file> --keep existing|rejected`. If a chat was moved to another
+  project in ChatGPT (same chat, other project), all at once with
+  `polaris conflicts --resolve-chat <chat-id> --keep rejected`. Conflicts
+  between different chats (mix-ups) are deliberately not resolved that way.
+- Last answer missing: the bridge holds back an answer still in progress
+  until a finished snapshot arrives. `polaris held-back` lists those chats
+  (`--clear <key>|all`); opening the chat or "Sync now" helps.
+- Extension exports nothing: check the DevTools console on the ChatGPT or
+  Claude page (`[Polaris]` errors), check in the popup whether a project was
+  detected and the API is usable, check the permissions.
+
+### Repairing after ChatGPT or Claude changes
+
+Both web APIs (`extension/chatgpt_api.js`, `extension/claude.js`) are
+undocumented. If their format changes, the popup says "API currently not
+usable …" and the health check reports missing archiving. Start there; gaps
+can be filled from the data export.
+
+The DOM is only a fallback; all DOM logic lives in `extension/extractor.js`.
+If ChatGPT changes its UI:
+
+1. Open DevTools on chatgpt.com and inspect a turn element.
+2. Messages: `getUnitTurns()` reads elements with
+   `data-chatgpt-search-unit-key` (role at the end, e.g. `...:assistant`),
+   `data-chatgpt-search-message-ids` (ID) and `data-markdown-text-style`
+   (text); the older markup (`conversation-turn-*`, `data-message-id`,
+   `data-message-author-role`) is tried first. A structure probe that prints
+   attributes only is described above `UNIT_SELECTOR` in `extractor.js`.
+3. Streaming detection: check whether `STREAMING_SELECTOR` still matches a
+   "Stop generating" button while an answer is generated. This is the one
+   assumption never verified against a real, running generation.
+4. Project detection comes from the address (`/g/g-p-<id>[-slug]/c/...` or
+   `/project`, `PATH_PROJECT_RE`); the DOM only provides the display name.
+5. Load the extension temporarily, check on a test conversation (watch the
+   console), then ship it as a new version (see below).
+
+The other files (`content.js`, `background.js`, `popup.*`) should not be
+affected by markup changes.
+
+### Known assumptions and risks
+
+- The ChatGPT and Claude APIs are undocumented and may change without notice.
+  Symptom: the popup reports the API as unusable, the health check says "no
+  ChatGPT message for N days".
+- The DOM fallback depends on the current ChatGPT markup. There `innerText`
+  gives rendered text without Markdown, parent relations come from DOM order
+  (`parent_id_source: "dom-order"`), and `STREAMING_SELECTOR` is the weakest
+  assumption.
+- Claude messages have no revisions: a Claude answer that was unfinished when
+  captured stays incomplete.
+- Only chats opened in the browser are archived; ChatGPT gaps can be filled
+  from the official export.
+
+### Shipping a new extension version (maintainer)
+
+1. Raise the version in `extension/manifest.json`.
+2. Build a ZIP of the contents of `extension/` (`manifest.json` at the ZIP
+   root): `(cd extension && zip -r ../polaris-chatgpt-connector-v<X.Y.Z>.zip .)`.
+3. Upload it at https://addons.mozilla.org/developers/addon/3070992/versions as
+   a new **unlisted** version; AMO signs it.
+4. Download the signed `.xpi` and install it in Firefox.
+5. Commit it as `dist/polaris-chatgpt-connector-<X.Y.Z>-signed.xpi` (remove
+   the old one); `install.sh` points to the newest.
+6. `scripts/publish-public.sh --push` checks the unpacked `.xpi` (version, ID,
+   signature, privacy), creates the release `v<X.Y.Z>` with the `.xpi` in the
+   public repository and updates `updates.json` there.
+
+## Module: ChatGPT data export
+
+The extension only archives conversations that are opened in the browser.
+Missing ones can be fetched from the official export: ChatGPT → Settings →
+Data controls → Export data, download the ZIP from the mail, then:
 
 ```bash
-polaris status
+polaris import-export ~/Downloads/<export>.zip --since 2026-09-14 --dry-run   # show
+polaris import-export ~/Downloads/<export>.zip --since 2026-09-14             # import
 ```
 
-Zeigt Inbox-Groesse, Anzahl verarbeiteter Events, bekannte/pending
-Projekte, bekannte Conversations/Messages und den Zeitpunkt des letzten
-Laufs.
+Only project conversations (`gizmo_id` = `g-p-...`), only the current branch;
+existing messages are skipped. Projects without a mapping are reported
+(`polaris map <id> <folder>`). The curator then processes the new material
+day by day as usual.
 
-## Projekt-Mapping
-
-Automatisch, in dieser Reihenfolge: bereits bekanntes Mapping ->
-exakter Name -> normalisierter Name (Gross/Klein, `_`/`-`,
-Nummerierungspraefixe) -> Fuzzy Match nur bei eindeutig hoher Sicherheit.
-Bei Unsicherheit: Pending, niemals raten.
+**Old chats as readable Markdown, without curation.** For large amounts of
+old chats, curation is expensive and skews the weighting. `archive-export`
+files them as Markdown instead; nothing goes to `raw/`, the curator ignores
+them:
 
 ```bash
-polaris projects              # bekannte Mappings anzeigen
-polaris map <project-id> <lokaler-pfad>
-polaris unmap <project-id>
+polaris archive-export ~/Downloads/<unpacked-export>/ --since 2025-10-02 --min-turns 6 \
+    --project Customer-A --project Customer-B --dry-run
 ```
 
-`polaris map` verarbeitet automatisch alle bereits wartenden Pending-
-Events dieses Projekts nach.
+Result: `<project>/ChatGPT-Archiv/<YYYY-MM-DD> <title>.md` (front matter with
+chat ID, period, `kuratiert: nein`) and
+`ChatGPT-Archiv/Dateien/<chat>/<original name>`. Branched chats refer to the
+original chat for the shared history. `.pst/.mbox/.zip` are only noted;
+uploaded files missing from the export are linked to a file of the same name
+in the project folder if there is one. Repeatable (already filed chat IDs are
+skipped). Single chats can be curated later by moving them into `inbox/`.
 
-Der Zielpfad muss unterhalb eines konfigurierten `project_roots`-Eintrags
-liegen (`~/.config/polaris/config.yaml`); alles andere wird abgelehnt
-(Schutz vor Fehlzuordnung/Pfad-Traversal).
+## Module: inbox (documents and mail)
 
-## Pending-Projekte
+Drop documents, notes or `.eml` mails into `<project>/inbox/documents/`,
+`inbox/notes/` or `inbox/mail/`. The curator extracts text (also from
+`.docx`/`.xlsx`/`.pptx` and mail attachments), curates it like a chat and
+archives the file. Details: [`curator/README.md`](curator/README.md).
+
+## Module: model runtimes
+
+The curator does not talk to a model API itself; it calls an agent CLI that
+is already logged in: `runtime: codex`, `runtime: claude`, or
+`runtime: command` with any CLI (template `curator/curator.example-command.yaml`).
+`polaris-curator llm-check` shows whether the runtime works. The evaluation
+of an exchangeable agent runtime is in
+[`docs/agent-runtime-evaluation.md`](docs/agent-runtime-evaluation.md), the
+decision in [`docs/adr/001-agent-runtime.md`](docs/adr/001-agent-runtime.md),
+an isolated proof of concept in
+[`experiments/agent-runtime-poc/`](experiments/agent-runtime-poc/README.md)
+(German).
+
+## Module: curator widget
+
+A theme-aware Omarchy bar widget in `omarchy-plugin/mst.polaris-curator/`. It
+shows new chat and inbox sources per project, starts one or all open curator
+runs, opens the curated knowledge files and shows the health check in its
+tooltip. The widget is a thin UI; all logic stays in the `polaris-curator`
+CLI. Installation: [its README](omarchy-plugin/mst.polaris-curator/README.md).
+
+## Cross-cutting modules
+
+### Health check
+
+`polaris-curator health` (and the widget) shows one line per area: capture,
+project separation, curator, storage and backup, machine memory, security,
+update, system (disk usage, failed systemd units, battery, recent crashes).
+`--all` shows every single check. Exit codes and JSON output are meant for
+agents as well as for people.
+
+### Radar and security check
+
+`polaris-radar` collects what matters before you customise Omarchy: updates
+and local changes of installed git plugins, watched issues and repositories,
+Omarchy commits, releases and newly listed plugins matching your keywords,
+and Omarchy news. It writes `handoff/omarchy-radar.md` into the machine
+memory; all third-party text is defused and marked as data.
+
+The security section compares installed packages with the
+[Arch Security Tracker](https://security.archlinux.org), the running kernel
+with kernel.org stable of the same branch, and actively exploited
+vulnerabilities from [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+with the kernel and installed packages. For package matches it checks the
+affected version ranges in the [NVD](https://nvd.nist.gov), so a package that
+is already fixed does not stay yellow. It runs once a day
+(`polaris-radar.timer`, about 3 MB) and after `omarchy update`. Details and
+switches: [`memory/README.md`](memory/README.md) (German).
+
+### Machine memory
+
+A shared Markdown memory under `~/.config/ai-agents/` for all local AI agents
+(Claude Code, Codex, Gemini, …): one rules file linked into every agent's
+global instruction file, a short index, and topic files in three layers
+(current state, durable knowledge, history). `memlint.py` checks structure,
+links, tags, secrets and backup coverage; the health check shows the result.
+
+- `install.sh` creates it from `memory/template/`, or restores it from the
+  mirror if one exists there. An existing memory is never changed; only
+  `memlint.py` and the shared skills are updated.
+- **Mirror** (`memory_mirror:` in `~/.config/polaris/config.yaml`): work
+  always happens locally; the mirror is a one-way copy into a folder of your
+  choice, every 30 min. Deleted or changed files are kept under
+  `.alt/<date>/`. If the drive is not mounted the run ends with 75 and
+  creates nothing below the mount point. The health check turns yellow if
+  the last successful run is older than 2 days.
+- `--no-memory` skips all of this.
+
+### Bundled: omarchy-backup, agent launchers, dock
+
+The install bundle carries [omarchy-backup](https://github.com/mstio/omarchy-backup)
+(snapshots, baseline drift, verified remote backup, fresh-install recovery)
+with its widget, and the agent launcher widget; `install.sh` can also install
+the dock. They are separate projects and only bundled for convenience.
+`--no-backup`, `--no-widget` and `--no-dock` leave them out.
+
+## Developer tooling
+
+### Install bundle (sharing without git)
+
+`./make-bundle.sh` builds `dist/polaris-setup-<version>.tar.gz` and `.zip`
+with all of Polaris:
+
+- code, the newest signed `.xpi` and `install.sh`; no tests, experiments or
+  local data
+- `extras/`: omarchy-backup and the widgets, each at the committed state of
+  its own repository
+- `memory/`: `memlint.py` and an empty memory template, never its contents.
+  The build aborts if `memory/tools/memlint.py` differs from the live copy.
+
+The recipient needs neither git nor a GitHub account:
 
 ```bash
-polaris pending
+unzip polaris-setup-<version>.zip          # or: tar -xzf polaris-setup-<version>.tar.gz
+bash polaris-setup-<version>/install.sh    # guided setup
 ```
 
-Zeigt unbekannte ChatGPT- und Claude-Projekte inkl. moeglicher Kandidaten (nur
-informativ, keine automatische Auswahl). Danach `polaris map` verwenden.
+The guided setup asks for the projects folder, the curator model, background
+services and widgets, omarchy-backup with its target folder, and the machine
+memory with an optional mirror folder; it shows a summary and only then sets
+things up. Every run writes a log to `~/.local/state/polaris/install-<time>.log`.
+The machine memory is created first, including `handoff/polaris.md` with
+state and open items. If the installation stops, it names step, reason, log
+and the guide [`docs/AGENTEN-LEITFADEN.md`](docs/AGENTEN-LEITFADEN.md)
+(German), so that a local AI agent can carry on by itself.
 
-## Logs
+From a bundle, `install.sh` copies the program files to
+`~/.local/share/polaris/app` and installs from there (update: run a newer
+bundle the same way; the old version goes to
+`~/.local/share/polaris/install-backups/`). It also sets up omarchy-backup
+(link, default configuration, widget) and registers the program folder in its
+`paths.d/`; with a target folder it enables daily snapshots. You set the
+baseline yourself.
 
-```bash
-tail -f ~/.local/state/polaris/polaris.log
-```
+### Privacy check and protected folders
 
-Enthaelt ausschliesslich technische Metadaten (IDs, Rollen, Mapping,
-Zielpfad, Status) - niemals Chat-Inhalte.
+Before packing, `scripts/privacy-check.py` scans every file for private data:
+your home path, your git e-mail, the names of the project folders below your
+project roots and the terms in `~/.config/polaris/bundle-deny.txt`. Any hit
+stops the build. General folder names can be allowed in
+`~/.config/polaris/bundle-allow.txt`; both lists stay local.
 
-## Fehlerdiagnose
+**Protected folders.** Nothing from a protected folder may be published, not
+even its name. A folder is protected by an empty file `.polaris-protected`
+inside a project folder, or by a line in `~/.config/polaris/protected.txt`
+(one folder per line, `~` allowed). Then these are blocked:
 
-- Datei bleibt in `~/Downloads/polaris-inbox/`: Extension-Download ist
-  fehlgeschlagen oder Bridge lief noch nicht (`polaris process` manuell
-  ausfuehren, `systemctl --user status polaris-bridge.path` pruefen).
-- Datei landet in `~/.local/share/polaris/failed/`: ungueltiges JSON oder
-  Schema. Grund steht im Log.
-- Datei landet in `~/.local/share/polaris/pending/<project-id>/`: Projekt
-  konnte nicht sicher zugeordnet werden. `polaris pending` +
-  `polaris map` verwenden.
-- Grund `dom-after-no-project`: ChatGPT meldete fuer diesen Chat zuletzt
-  ausdruecklich kein Projekt; eine Ersatzerfassung aus der Seite (Projekt nur
-  aus der evtl. veralteten Adresse) wird 7 Tage lang abgelehnt. Chat neu
-  laden, sobald er wieder in einem Projekt liegt (seit 2026-09-29).
-- Konflikte (`polaris conflicts`): einzeln mit `--resolve <Datei> --keep
-  existing|rejected`. Wurde ein Chat in ChatGPT in ein anderes Projekt
-  verschoben (derselbe Chat, anderes Projekt), alle auf einmal mit
-  `polaris conflicts --resolve-chat <Chat-ID> --keep rejected`. Konflikte
-  zwischen verschiedenen Chats (Vermischung) klaert `--resolve-chat` bewusst
-  nicht.
-- Letzte Antwort fehlt: Die Bridge haelt eine noch laufende letzte Antwort
-  zurueck, bis ein fertiges Abbild kommt. `polaris held-back` zeigt die
-  betroffenen Chats (`--clear <Schluessel>|all` bereinigt, Schluessel wie in der Ausgabe); Chat oeffnen oder
-  „Sync now“ hilft.
-- Extension exportiert nichts: DevTools-Konsole auf der ChatGPT- bzw.
-  Claude-Seite pruefen (`[Polaris]`-Fehler), Popup pruefen, ob ein Projekt
-  erkannt wurde und ob die Schnittstelle nutzbar ist, Berechtigung pruefen
-  (siehe „Berechtigung fuer chatgpt.com / claude.ai“).
+- its name (exact spelling, whole word, also in file paths) and its path
+- every file from it, byte for byte, including PDF, Office files and images
+- every text line with content (4 or more letters/digits) as a whole line,
+  and every sequence of 5 words from it (25+ characters) inside other text
 
-## Extension nach ChatGPT-/Claude-Aenderungen reparieren
+Only lines Polaris writes into every project are exempt (standard headings,
+the curator meta line, `polaris-` comments, JSON scaffolding with Polaris
+keys). Hits name file and line, never the text; `bundle-allow.txt` cannot lift
+the protection. Folders are read only during the check, and the fingerprints
+are not stored. Limit: rephrased or translated content cannot be detected by
+any mechanical check.
 
-Seit v0.4.0 liest die Extension ChatGPT ueber die Web-Schnittstelle
-(`extension/chatgpt_api.js`), Claude ebenfalls ueber dessen Schnittstelle
-(`extension/claude.js`). Beide Schnittstellen sind nicht dokumentiert; aendert
-sich ihr Format, zeigt das Popup „Schnittstelle gerade nicht nutzbar …“ und
-der Health Check meldet ausbleibende Archivierung. Dann zuerst dort ansetzen;
-Luecken lassen sich ueber den Datenexport schliessen.
+### Public mirror (maintainer)
 
-Der Seitenaufbau (DOM) wird nur noch als Rueckfall gelesen. Die gesamte
-DOM-spezifische Logik liegt ausschliesslich in `extension/extractor.js`.
-Wenn ChatGPT sein UI aendert:
+Development happens in a private repository with full history. Released
+states go to this public repository with
+`scripts/publish-public.sh [<ref>] [--push]`, one commit per release, without
+history and without binary bundles, after the same privacy check. Tests and
+comments therefore use invented names only (Kunde-A, Musterfirma, …). A
+`pre-push` hook in the mirror clone (`scripts/public-pre-push`, linked by
+`publish-public.sh`) runs the check on every pushed commit, including author,
+committer and message, so a direct `git push` is checked too; mirror commits
+use the GitHub noreply address. Pull requests are taken over with
+`git format-patch | git am -3` (see the script header). Guide for
+contributors and their AI agents: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-1. Auf chatgpt.com DevTools oeffnen, ein Turn-Element inspizieren.
-2. Nachrichten: Seit 2026-09-25 liest `getUnitTurns()` Elemente mit
-   `data-chatgpt-search-unit-key` (Rolle am Ende, z. B. `...:assistant`),
-   `data-chatgpt-search-message-ids` (ID) und `data-markdown-text-style`
-   (Text); das fruehere Markup (`conversation-turn-*`, `data-message-id`,
-   `data-message-author-role`) wird zuerst versucht. Ohne DOM-Wissen
-   pruefbar mit einer Struktur-Probe in der Konsole, die nur Attribute
-   ausgibt (siehe Kommentar ueber `UNIT_SELECTOR` in `extractor.js`).
-3. Streaming-Erkennung: pruefen, ob `STREAMING_SELECTOR` noch einen
-   "Stop generating"-Button trifft, waehrend eine Antwort generiert wird.
-   Das ist die einzige Annahme im System, die nie gegen eine echte,
-   laufende Generierung verifiziert wurde - am wahrscheinlichsten
-   reparaturbeduerftig, falls der Auto-Export ausbleibt.
-4. Projekt-Erkennung: kommt seit 2026-09-25 aus der Adresse
-   (`/g/g-p-<id>[-slug]/c/...` bzw. `/project`, `PATH_PROJECT_RE`); das DOM
-   liefert nur noch den Anzeigenamen. Der frueher genutzte
-   `aria-label="Open <Name> project"`-Link existiert nicht mehr.
-5. Extension in `about:debugging` temporaer laden, auf einer
-   Testkonversation pruefen (Konsole beobachten), danach als neue Version
-   ausliefern (siehe „Neue Version ausliefern“).
+## Paths
 
-Die uebrigen Dateien (`content.js`, `background.js`, `popup.*`) sollten von
-reinen Markup-Aenderungen unberuehrt bleiben.
+| What | Path |
+|---|---|
+| Code (git checkout) | `~/Projects/polaris-connector/` (or `~/.local/share/polaris/app` from a bundle) |
+| CLIs | `~/.local/bin/polaris`, `polaris-curator`, `polaris-radar`, `polaris-memory-mirror` |
+| Configuration | `~/.config/polaris/` (`config.yaml` with `project_roots`, `projects.yaml` mappings, `curator.yaml`, `radar.yaml`) |
+| Browser inbox | `~/Downloads/polaris-inbox/` |
+| Pending / processed / failed | `~/.local/share/polaris/{pending,processed,failed}/` |
+| State and logs | `~/.local/state/polaris/` (`polaris.log`, `security.json`, `nvd.json`, install logs) |
+| systemd units | `~/.config/systemd/user/polaris-*.{service,path,timer}` (copies from `systemd/`; curator units see `curator/README.md`) |
+| Widget | `~/.config/omarchy/plugins/mst.polaris-curator/` (copy of `omarchy-plugin/`) |
+| Machine memory | `~/.config/ai-agents/` |
 
-## Vollstaendige Deinstallation
+## Uninstalling
 
 ```bash
-systemctl --user disable --now polaris-bridge.path polaris-bridge.timer
-rm ~/.config/systemd/user/polaris-bridge.{path,service,timer}
+systemctl --user disable --now polaris-bridge.path polaris-bridge.timer polaris-radar.timer polaris-memory-mirror.timer
+rm ~/.config/systemd/user/polaris-bridge.{path,service,timer} ~/.config/systemd/user/polaris-radar.{service,timer} \
+   ~/.config/systemd/user/polaris-memory-mirror.{service,timer}
 systemctl --user daemon-reload
 
-bridge/install-native-host.sh --remove   # vor dem Loeschen des Repos
+bridge/install-native-host.sh --remove   # before deleting the repository
 
-rm ~/.local/bin/polaris
-rm -rf ~/Projects/polaris-chatgpt-connector
-
-rm -rf ~/.config/polaris
-rm -rf ~/.local/share/polaris
-rm -rf ~/.local/state/polaris
-rm -rf ~/Downloads/polaris-inbox
+rm ~/.local/bin/polaris ~/.local/bin/polaris-radar ~/.local/bin/polaris-memory-mirror
+rm -rf ~/Projects/polaris-connector
+rm -rf ~/.config/polaris ~/.local/share/polaris ~/.local/state/polaris ~/Downloads/polaris-inbox
 ```
 
-Curator-Units und -Dateien entfernt man getrennt (siehe `curator/README.md`).
-Bereits archivierte Rohdaten unter `<Projekt>/raw/{chatgpt,claude}/` in den
-jeweiligen Projektordnern bleiben davon unberuehrt (bewusst - das sind
-deine Projektdaten, keine Bridge-internen Dateien) und muessen bei
-Bedarf manuell entfernt werden.
-
-Extension in Firefox: `about:addons` -> Polaris -> „Entfernen“.
+Curator units and files are removed separately (see `curator/README.md`).
+Archived raw data under `<project>/raw/` and the curated files stay in your
+project folders on purpose: they are your data. The machine memory
+(`~/.config/ai-agents`) is left alone as well. Extension: `about:addons` →
+Polaris → Remove.
 
 ## Tests
 
 ```bash
-cd tests
-python3 -m unittest discover          # Bridge + (falls node vorhanden) Extension
-node --test tests/extension/          # nur Extension (aus dem Repo-Wurzelordner)
-cd curator/tests && POLARIS_NO_NOTIFY=1 python3 -m unittest discover
+(cd tests && POLARIS_NO_NOTIFY=1 python3 -m unittest discover)          # bridge, privacy check, extension (if node exists)
+node --test tests/extension/                                              # extension only
+(cd curator/tests && POLARIS_NO_NOTIFY=1 python3 -m unittest discover)   # curator, health check
+python3 -m unittest discover -s memory/tests                             # memlint, radar, mirror
 ```
 
-Extension-Tests (seit 2026-09-29, ohne Abhaengigkeiten): `harness.mjs`
-(vm-Sandbox mit Fake-Uhr/Timern/DOM/fetch fuer `content.js`), `minidom.mjs`
-(kleines DOM fuer `extractor.js`), eigene Umgebungen fuer `claude.js` und
-`background.js`. `POLARIS_CONTENT_JS=<datei>` prueft einen anderen Stand von
-`content.js` - so laesst sich zeigen, dass ein Test den alten Fehler erkennt.
+Plain `unittest`, no extra packages, no network. Extension tests run in a
+`vm` sandbox with fake clock, timers, DOM and fetch (`harness.mjs`,
+`minidom.mjs`); `POLARIS_CONTENT_JS=<file>` runs them against another state of
+`content.js`. Tests only touch temporary directories; start them with
+`POLARIS_NO_NOTIFY=1` and, to be safe, a redirected `HOME`.
 
-Bridge: 143 Tests (Stand 2026-10-23), reines `unittest` (kein pytest auf
-diesem System installiert); einer davon startet die 56 Node-Tests der
-Extension, sofern `node` vorhanden ist. Abgedeckt u. a.: Matching, Schema,
-atomare append-only Ablage, Revisionen, Pending -> Mapping ->
-Nachverarbeitung, Chat-Abbild/Turns (`test_snapshot.py`), Konflikte und
-Quarantaene (`test_conflicts.py`), Native Host, Datenexport-Import und
--Archiv. Tests laufen nur gegen temporaere Verzeichnisse; zur Sicherheit mit
-`POLARIS_NO_NOTIFY=1` und bei Bedarf umgeleitetem `HOME` starten.
+## License
 
-## Bekannte Annahmen / Risiken
-
-- ChatGPT- und Claude-Schnittstellen (`/backend-api/conversation/<id>`,
-  `/api/organizations/<org>/chat_conversations/<id>`) sind nicht
-  dokumentiert und koennen sich ohne Ankuendigung aendern. Symptom: Popup
-  meldet die Schnittstelle als nicht nutzbar, Health Check „keine
-  ChatGPT-Nachricht seit N Tagen“.
-- Der DOM-Rueckfall (`extractor.js`) haengt am aktuellen ChatGPT-Markup
-  (zuletzt am 2026-09-25 live neu bestimmt). Dort liefert `innerText` nur den
-  gerenderten Text ohne Markdown-Formatierung, Parent-Beziehungen werden aus
-  der DOM-Reihenfolge abgeleitet (`parent_id_source: "dom-order"`), und
-  `STREAMING_SELECTOR` (Erkennung laufender Antworten ueber sichtbare
-  Stop-Knoepfe) ist die am wenigsten belastbare Annahme.
-- Claude-Nachrichten haben keine Revisionen: eine beim Erfassen noch
-  unfertige Claude-Antwort bleibt unvollstaendig (Abhilfe braeuchte eine neue
-  Extension-Version).
-- Die Extension archiviert nur Chats, die im Browser geoeffnet werden;
-  ChatGPT-Luecken schliesst der offizielle Datenexport
-  (`polaris import-export`).
+MIT, see [`LICENSE`](LICENSE).

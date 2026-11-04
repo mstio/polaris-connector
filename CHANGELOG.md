@@ -8,6 +8,10 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- README und CONTRIBUTING auf Englisch, die README nach Kern und Modulen gegliedert
+  (Projektgedächtnis als Kern; Quellen, Modell-Runtimes, Widget, Health Check,
+  Radar, Maschinengedächtnis als Module). Übrige Doku bleibt deutsch. Nacharbeit: keine.
+
 - Neu: Versionsabgleich im Radar-Sicherheitsabschnitt. Aktiv ausgenutzte Lücken
   (CISA KEV) auf ein installiertes Paket werden mit den Versionsbereichen der NVD
   verglichen; ist die installierte Version nicht betroffen, bleibt der Health

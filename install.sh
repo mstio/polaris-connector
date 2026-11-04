@@ -47,7 +47,7 @@
 # 'omarchy plugin add', abschaltbar mit --no-dock). Ersetzte Dateien werden
 # vorher nach ~/.local/share/polaris/install-backups/<Zeit>/ gesichert.
 # Die Firefox-Erweiterung selbst (AMO, signiert) wird von Hand installiert,
-# siehe README "Extension installieren".
+# siehe README "Installing the extension".
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
