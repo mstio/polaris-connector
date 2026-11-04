@@ -32,6 +32,25 @@ class TestSandboxIsolation(unittest.TestCase):
         self.assertLessEqual(int(r.stdout.strip() or 0), 3)
 
 
+@unittest.skipUnless(sandbox.available(), "bubblewrap nicht nutzbar")
+class TestCommandRuntimeIsSandboxed(unittest.TestCase):
+    def test_command_cli_cannot_see_home(self):
+        from polaris_curator import config, llm
+        probe = Path.home() / ".config"
+        cmd = ["sh", "-c", f"if [ -e '{probe}' ]; then echo '{{\"seen\": true}}'; "
+                           "else echo '{\"seen\": false}'; fi"]
+        cfg = config.CuratorConfig(runtime="command", command=cmd)
+        r = llm._run_command("x", "m", cfg, schema={"type": "object"})
+        self.assertEqual(r.data, {"seen": False})
+
+    def test_extra_paths_only_from_local_config(self):
+        from polaris_curator import config
+        cfg = config.CuratorConfig().merged_with({"command_sandbox_ro": ["~/.mycli"]})
+        self.assertEqual(cfg.command_sandbox_ro, ["~/.mycli"])
+        self.assertNotIn("command_sandbox_ro", config.PROJECT_OVERRIDE_KEYS)
+        self.assertNotIn("command_sandbox_rw", config.PROJECT_OVERRIDE_KEYS)
+
+
 class TestSandboxFallbackIsLoud(unittest.TestCase):
     def test_disabled_sandbox_is_reported(self):
         sandbox.available.cache_clear()

@@ -34,6 +34,11 @@ command_output_key: response
 #   crush:     ["crush", "run"]                                    (Prompt ueber stdin)
 #   grok:      ["grok", "agent", "--json-schema", "{schema_json}"]
 
+# Die CLI laeuft in einer Sandbox ohne Home (bubblewrap). Braucht sie ihre
+# Anmeldung o. Ae., die Pfade hier freigeben (nur in der lokalen curator.yaml):
+# command_sandbox_ro: ["~/.config/meine-cli"]
+# command_sandbox_rw: ["~/.local/share/meine-cli"]
+
 claude_fallback_model: null
 reviewer_model: null
 llm_timeout_seconds: 1200

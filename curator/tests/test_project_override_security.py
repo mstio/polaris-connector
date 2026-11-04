@@ -56,11 +56,11 @@ class TestProjectOverrideAllowList(unittest.TestCase):
 
     def test_allowed_keys_still_apply(self):
         self._override("budget:\n  max_batches_per_run: 2\ncontext:\n  index_cap: 0\n"
-                       "compaction:\n  idle_backoff_max: 3\n")
+                       "compaction:\n  idle_backoff_max: 8\n")
         cfg = config.load_config(self.project)
         self.assertEqual(cfg.max_batches_per_run, 2)
         self.assertEqual(cfg.index_cap, 0.0)
-        self.assertEqual(cfg.idle_backoff_max, 3)
+        self.assertEqual(cfg.idle_backoff_max, 8)  # nur seltener als global (4) erlaubt
         self.assertEqual(cfg.project_refused_keys, ())
 
     def test_project_may_only_make_runs_cheaper(self):

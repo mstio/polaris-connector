@@ -24,7 +24,10 @@ verlangen. Einzelheiten stehen in der README.
     geleerte Umgebung (keine Tokens aus der Shell), codex mit eigenem
     `CODEX_HOME`, das nur die Anmeldung enthält (Sitzungsprotokolle in
     `~/.codex` bleiben unsichtbar), pdftotext ohne Netz. Fehlt die Sandbox,
-    meldet der Health Check das (Zeile „Modell“).
+    meldet der Health Check das (Zeile „Modell“). Seit dem gleichen Tag auch
+    Claude (Ersatz und Prüfer, eigenes `CLAUDE_CONFIG_DIR` nur mit der
+    Anmeldung) und `runtime: command` (eigenes leeres Home; nötige Pfade per
+    `command_sandbox_ro`/`command_sandbox_rw` in der lokalen `curator.yaml`).
   - Projekt-Overrides dürfen Läufe nur billiger oder seltener machen, nie
     teurer; unlesbare Werte werden gemeldet statt den Lauf abzubrechen.
   - Spiegel: Links, die aus dem Gedächtnis hinauszeigen, kommen nicht mit;

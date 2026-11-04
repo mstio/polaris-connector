@@ -154,6 +154,10 @@ class CuratorConfig:
     # einer JSON-Huelle mit der eigentlichen Antwort (z. B. "response").
     command: list[str] | None = None
     command_output_key: str | None = None
+    # Zusaetzliche Pfade fuer die Sandbox von runtime: command (z. B. der
+    # Ordner mit der Anmeldung der CLI); nur aus der lokalen curator.yaml.
+    command_sandbox_ro: list[str] = field(default_factory=list)
+    command_sandbox_rw: list[str] = field(default_factory=list)
 
     def merged_with(self, override: dict[str, Any]) -> "CuratorConfig":
         cfg = replace(self)
@@ -177,6 +181,12 @@ class CuratorConfig:
                                           and all(isinstance(a, str) for a in value)):
                 raise ValueError("curator.yaml: command muss eine Liste von Strings sein")
             cfg.command = list(value) if value else None
+        for key in ("command_sandbox_ro", "command_sandbox_rw"):
+            if key in override:
+                value = override[key] or []
+                if not (isinstance(value, list) and all(isinstance(a, str) for a in value)):
+                    raise ValueError(f"curator.yaml: {key} muss eine Liste von Pfaden sein")
+                setattr(cfg, key, list(value))
         if "command_output_key" in override:
             cfg.command_output_key = override["command_output_key"] or None
         if "llm_timeout_seconds" in override:
@@ -324,7 +334,7 @@ _PROJECT_LIMITS = {
     "max_chars_per_attachment": "min", "max_images_per_document": "min",
     "min_messages_for_early_run": "max", "min_chars_for_early_run": "max",
     "compact_min_interval_days": "max", "loops_review_interval_days": "max",
-    "compact_threshold_chars": "max", "min_image_bytes": "max",
+    "compact_threshold_chars": "max", "min_image_bytes": "max", "idle_backoff_max": "max",
 }
 
 

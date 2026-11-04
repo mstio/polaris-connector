@@ -73,16 +73,16 @@ def _parse_tokens_used(stderr: str) -> int | None:
 
 
 def _sync_back_codex_auth(private: Path, real: Path, before: bytes) -> None:
-    """Hat codex die Anmeldung in der Sandbox erneuert, sie atomar nach
-    ~/.codex zurueckschreiben - nur gueltiges JSON und nur, wenn sich die
-    echte Datei inzwischen nicht selbst geaendert hat."""
+    """Hat die Modell-CLI ihre Anmeldung in der Sandbox erneuert, sie atomar
+    an den echten Ort zurueckschreiben - nur gueltiges JSON und nur, wenn sich
+    die echte Datei inzwischen nicht selbst geaendert hat."""
     try:
         after = private.read_bytes()
         if after == before or real.read_bytes() != before:
             return
         json.loads(after)
     except (OSError, ValueError):
-        logger.warning("codex-Anmeldung aus der Sandbox nicht zurueckgeschrieben")
+        logger.warning("Anmeldung aus der Sandbox nicht zurueckgeschrieben: %s", real)
         return
     tmp = real.with_name(f".{real.name}.polaris-{os.getpid()}")
     try:
@@ -92,7 +92,7 @@ def _sync_back_codex_auth(private: Path, real: Path, before: bytes) -> None:
         os.replace(tmp, real)
     except OSError:
         tmp.unlink(missing_ok=True)
-        logger.warning("codex-Anmeldung konnte nicht zurueckgeschrieben werden")
+        logger.warning("Anmeldung konnte nicht zurueckgeschrieben werden: %s", real)
 
 
 def _run_codex_exec(
@@ -158,10 +158,16 @@ def _run_codex_exec(
         private_home = tmp / "codex-home"
         private_home.mkdir(mode=0o700)
         auth_before = None
-        if codex_bin is not None and sandbox.available() and auth_src.is_file():
-            auth_before = auth_src.read_bytes()
-            (private_home / "auth.json").write_bytes(auth_before)
-            os.chmod(private_home / "auth.json", 0o600)
+        if codex_bin is not None and sandbox.available():
+            # Auch ohne auth.json in der Sandbox (Anmeldung dann z. B. ueber
+            # die Umgebung, die hier geleert ist): lieber laut scheitern als
+            # still ohne Sandbox laufen (Zweitmeinung 2026-11-04).
+            if auth_src.is_file():
+                auth_before = auth_src.read_bytes()
+                (private_home / "auth.json").write_bytes(auth_before)
+                os.chmod(private_home / "auth.json", 0o600)
+            else:
+                logger.warning("codex: %s fehlt - Aufruf in der Sandbox ohne Anmeldung", auth_src)
             cmd = sandbox.wrap(cmd, ro=[codex_bin.parent.parent], rw=[tmp], net=True,
                                home=Path.home(), env={"CODEX_HOME": str(private_home)})
         try:
@@ -255,19 +261,39 @@ def _run_claude(prompt: str, model: str, cfg: CuratorConfig, schema: dict | None
     2026-09-30: ~1k Token Vorlauf, die globale CLAUDE.md wird nicht geladen.
     (--bare liest die Anmeldung nicht und scheidet deshalb aus.)"""
     with tempfile.TemporaryDirectory(prefix="polaris-curator-claude-") as tmp_dir:
+        claude_bin = sandbox.resolve_binary("claude")
         cmd = [
-            "claude", "-p",
+            str(claude_bin) if claude_bin else "claude", "-p",
             "--restricted", "--setting-sources=", "--tools", "", "--strict-mcp-config",
             "--no-session-persistence", "--disable-slash-commands",
             "--output-format", "json",
             "--model", model,
             "--json-schema", json.dumps(schema or JSON_SCHEMA),
         ]
+        # Sandbox wie bei codex (2026-11-04): eigenes CLAUDE_CONFIG_DIR nur mit
+        # der Anmeldung, kein Home, geleerte Umgebung. Die Werkzeugsperre
+        # oben bleibt; die Sandbox greift, falls sie einmal versagt.
+        tmp = Path(tmp_dir)
+        cred_src = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / ".credentials.json"
+        cred_before = None
+        if claude_bin is not None and sandbox.available():
+            private_cfg = tmp / "claude-config"
+            private_cfg.mkdir(mode=0o700)
+            if cred_src.is_file():
+                cred_before = cred_src.read_bytes()
+                (private_cfg / ".credentials.json").write_bytes(cred_before)
+                os.chmod(private_cfg / ".credentials.json", 0o600)
+            else:
+                logger.warning("claude: %s fehlt - Aufruf in der Sandbox ohne Anmeldung", cred_src)
+            cmd = sandbox.wrap(cmd, ro=[claude_bin.parent], rw=[tmp], net=True, home=tmp,
+                               env={"CLAUDE_CONFIG_DIR": str(private_cfg)})
         try:
             result = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                                     timeout=cfg.llm_timeout_seconds, cwd=tmp_dir)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise LlmUnavailableError(f"claude konnte nicht ausgefuehrt werden: {exc}") from exc
+        if cred_before is not None:
+            _sync_back_codex_auth(tmp / "claude-config" / ".credentials.json", cred_src, cred_before)
     try:
         out = json.loads(result.stdout or "{}")
     except json.JSONDecodeError:
@@ -389,6 +415,27 @@ def _run_command(prompt: str, model: str, cfg: CuratorConfig, schema: dict | Non
             for k, v in subst.items():
                 arg = arg.replace(k, v)
             argv.append(arg)
+        # Sandbox (2026-11-04): Programmordner der CLI nur lesend, eigenes
+        # leeres Home; Anmeldedaten o. Ae. nur ueber command_sandbox_ro/_rw
+        # in der lokalen curator.yaml (Projekt-Overrides koennen das nicht).
+        binary = sandbox.resolve_binary(argv[0]) if argv else None
+        if binary is not None:
+            argv[0] = str(binary)
+            # Den Programmordner nur freigeben, wenn er eigens der CLI gehoert;
+            # liegt sie im Home, in ~/.local/bin o. Ae., nur die Datei selbst.
+            home = Path.home()
+            parent = binary.parent
+            broad = parent == home or parent in home.parents or parent == home / ".local" / "bin"
+            ro = [binary if broad else parent]
+            extra_ro = [Path(p).expanduser() for p in cfg.command_sandbox_ro]
+            extra_rw = [tmp] + [Path(p).expanduser() for p in cfg.command_sandbox_rw]
+            for p in [*extra_ro, *extra_rw[1:]]:
+                if not p.exists():
+                    logger.warning("command_sandbox: %s gibt es nicht - nicht freigegeben", p)
+                elif p == home or p in home.parents or p == Path("/"):
+                    logger.warning("command_sandbox: %s gibt das ganze Home frei - Sandbox wirkungslos", p)
+            argv = sandbox.wrap(argv, ro=ro + [p for p in extra_ro if p.exists()],
+                                rw=[p for p in extra_rw if p.exists()], net=True, home=tmp)
         try:
             # Im Dateimodus stdin schliessen: manche CLIs warten sonst auf Eingabe.
             result = subprocess.run(argv, input=None if uses_prompt_file else full_prompt,
