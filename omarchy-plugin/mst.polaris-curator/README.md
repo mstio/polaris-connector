@@ -9,6 +9,10 @@ The widget is intentionally a thin UI. Project discovery, status calculation,
 locking, budgets, LLM execution, atomic merges, and inbox archiving stay in the
 `polaris-curator` CLI.
 
+Language: English or German, from `language: en|de` in
+`~/.config/polaris/curator.yaml` (default without the line: German). The CLI
+passes it as `language` in its JSON; the widget translates its own fixed texts.
+
 ## Installation
 
 `./install.sh` in the parent repository does all of this (copy, enable,

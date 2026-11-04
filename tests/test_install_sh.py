@@ -127,6 +127,34 @@ class InstallShTest(unittest.TestCase):
         self.assertTrue((mem / "handoff" / "omarchy-radar.md").is_file())
         self.assertIn("| `handoff/omarchy-radar.md` |", (mem / "AI_HANDOFF.md").read_text())
 
+    def _new_curator_yaml(self, *extra, lang="C.UTF-8"):
+        self.env["LANG"] = lang
+        args = [a for a in BASE_ARGS] + list(extra)
+        r = self.install(*args)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return (self.home / ".config" / "polaris" / "curator.yaml").read_text()
+
+    def test_new_curator_yaml_language_from_system(self):
+        self.assertIn("\nlanguage: en\n", self._new_curator_yaml())
+
+    def test_new_curator_yaml_german_system_language(self):
+        self.assertIn("\nlanguage: de\n", self._new_curator_yaml(lang="de_DE.UTF-8"))
+
+    def test_language_option_wins(self):
+        self.assertIn("\nlanguage: de\n", self._new_curator_yaml("--language", "de"))
+
+    def test_existing_curator_yaml_untouched(self):
+        cfg = self.home / ".config" / "polaris"
+        cfg.mkdir(parents=True)
+        (cfg / "curator.yaml").write_text("runtime: claude\n")
+        r = self.install(*BASE_ARGS, "--language", "en")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((cfg / "curator.yaml").read_text(), "runtime: claude\n")
+
+    def test_invalid_language_rejected(self):
+        r = self.install(*BASE_ARGS, "--language", "fr")
+        self.assertEqual(r.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

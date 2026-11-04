@@ -13,6 +13,8 @@ from typing import Any
 
 import yaml
 
+from . import i18n
+
 HOME = Path.home()
 GLOBAL_CONFIG_DIR = HOME / ".config" / "polaris"
 GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "curator.yaml"
@@ -129,6 +131,13 @@ class CuratorConfig:
     # Fehler in curator.yaml, die nicht zum Abbruch fuehren sollen; der Health
     # Check zeigt sie rot an (sonst stuerzte auch der naechtliche Lauf ab).
     config_problems: tuple[str, ...] = ()
+    # Sprache von Widget und Health Check (i18n.py, seit 2026-11-04). Fehlt der
+    # Schluessel, gilt "de" (Bestandsinstallationen bleiben deutsch); nur die
+    # Vorgabe einer Neuinstallation (ensure_global_config) schreibt "en".
+    language: str = i18n.DEFAULT
+    # Problem aus `language`, getrennt gemerkt, damit eine Chatquellen-Angabe
+    # (die ihre Probleme ersetzt) es nicht verschluckt.
+    language_problems: tuple[str, ...] = ()
     # Verdichtung von knowledge.md (compact.py): automatisch ab dieser Groesse,
     # hoechstens alle min_interval_days Tage. 0 = automatisch nie.
     compact_threshold_chars: int = 100000
@@ -200,11 +209,21 @@ class CuratorConfig:
             cfg.full_context_chars = int(ctx["full_context_chars"])
         if "index_cap" in ctx:
             cfg.index_cap = max(0.0, min(0.9, float(ctx["index_cap"])))
+        if "language" in override:
+            value = override["language"]
+            lang = i18n.normalize(value)
+            old = cfg.language_problems
+            cfg.language = lang or i18n.DEFAULT
+            cfg.language_problems = () if lang else (i18n.t_lang(
+                i18n.resolve(cfg.language),
+                "curator.yaml: language muss de oder en sein (gefunden: {value}) - bis zur Korrektur gilt de",
+                value=value),)
+            cfg.config_problems = cfg.language_problems + tuple(p for p in cfg.config_problems if p not in old)
         mon = override.get("monitoring", {}) or {}
         if "chat_sources" in mon:
-            cfg.chat_sources, problems = _parse_chat_sources(mon["chat_sources"])
+            cfg.chat_sources, problems = _parse_chat_sources(mon["chat_sources"], i18n.resolve(cfg.language))
             cfg.chat_sources_explicit = True
-            cfg.config_problems = tuple(problems)
+            cfg.config_problems = cfg.language_problems + tuple(problems)
         if "max_days_without_chatgpt" in mon:
             cfg.max_days_without_chatgpt = int(mon["max_days_without_chatgpt"])
         if "max_days_without_claude" in mon:
@@ -231,16 +250,17 @@ class CuratorConfig:
 SUPPORTED_CHAT_SOURCES = ("chatgpt", "claude")
 
 
-def _parse_chat_sources(value: Any) -> tuple[tuple[str, ...], list[str]]:
+def _parse_chat_sources(value: Any, lang: str = i18n.DEFAULT) -> tuple[tuple[str, ...], list[str]]:
     """monitoring.chat_sources tolerant lesen: Gross-/Kleinschreibung und
     Leerraum egal, Duplikate still entfernt. Unbekannte Eintraege werden
     verworfen und als Problem gemeldet; ist der Wert keine Liste, gelten beide
     Quellen (lieber zu viel pruefen als eine Erfassung unbemerkt ausfallen
     lassen)."""
     if not isinstance(value, list):
-        return SUPPORTED_CHAT_SOURCES, [
+        return SUPPORTED_CHAT_SOURCES, [i18n.t_lang(
+            lang,
             "curator.yaml: monitoring.chat_sources muss eine Liste sein, z. B. [chatgpt, claude] oder [] "
-            "- bis zur Korrektur werden beide Quellen geprüft"]
+            "- bis zur Korrektur werden beide Quellen geprüft")]
     sources: list[str] = []
     unknown: list[str] = []
     for item in value:
@@ -252,8 +272,9 @@ def _parse_chat_sources(value: Any) -> tuple[tuple[str, ...], list[str]]:
             unknown.append(str(item))
     problems = []
     if unknown:
-        problems.append(f"curator.yaml: nicht unterstützte Chatquelle(n) {', '.join(unknown)} ignoriert "
-                        f"(möglich: {', '.join(SUPPORTED_CHAT_SOURCES)})")
+        problems.append(i18n.t_lang(
+            lang, "curator.yaml: nicht unterstützte Chatquelle(n) {unknown} ignoriert (möglich: {supported})",
+            unknown=", ".join(unknown), supported=", ".join(SUPPORTED_CHAT_SOURCES)))
     return tuple(sources), problems
 
 
@@ -268,12 +289,17 @@ def _read_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+NEW_INSTALL_LANGUAGE_BLOCK = "# Language of the widget and health check: en or de\nlanguage: en\n"
+
+
 def ensure_global_config() -> None:
     GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if GLOBAL_CONFIG_FILE.exists():
         return
     tmp = GLOBAL_CONFIG_FILE.with_suffix(".yaml.tmp")
     with tmp.open("w", encoding="utf-8") as f:
+        # Neuinstallation: englische Oberflaeche; ohne den Schluessel gilt "de".
+        f.write(NEW_INSTALL_LANGUAGE_BLOCK)
         yaml.safe_dump(DEFAULTS, f, allow_unicode=True, sort_keys=False)
     tmp.replace(GLOBAL_CONFIG_FILE)
 

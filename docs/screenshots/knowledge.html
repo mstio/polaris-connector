@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<!-- Nachgebaute englische Ansicht von knowledge.md im Editor (Demo-Inhalt, uebersetzt); Quelle fuer knowledge.png. -->
+<style>
+  :root{--bg:#1b130b;--text:#e6d8bd;--muted:#7d6e58;--gold:#e8cf96;--num:#6e604c}
+  *{box-sizing:border-box;margin:0;padding:0;font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0}
+  body{font-feature-settings:"liga" 0,"calt" 0;width:1600px;height:720px;background:var(--bg);color:var(--text);font:15.5px/22px "JetBrainsMono Nerd Font",monospace;padding:18px 0;overflow:hidden}
+  .l{display:flex;white-space:pre} .n{width:58px;text-align:right;color:var(--num);padding-right:26px}
+  .h{color:var(--gold);font-weight:700} .c{color:var(--muted);font-style:italic} .k{color:var(--gold);font-weight:700}
+  .i{border-left:1px solid var(--num);margin-left:4px;padding-left:12px}
+</style></head><body>
+<div id="t"></div>
+<script>
+const L=[
+['h','# Project knowledge'],['c','<!-- polaris-ids: K=7 -->'],['',''],
+['h','## Target picture'],['k','Fact','Example Ltd moves its servers from its own basement to a data centre in Sampletown by the end of March 2027.'],
+['i','- Scope: company-wide · Evidence: confirmed · Confidence: high'],['i','- ID: K1 · Valid since: 2026-10-02'],
+['ic','<!-- polaris-source: type=chatgpt conversation_id=c-demo-01 message_ids=m-04 -->'],['',''],
+['h','## Current status'],['k','Fact','Offers from three data centres are in; the cheapest is 18 % under budget but requires a 36-month term.'],
+['i','- Scope: cross-functional · Evidence: multiple independent sources · Confidence: high'],['i','- ID: K4 · Valid since: 2026-10-21'],
+['ic','<!-- polaris-source: type=document path=inbox/documents/archive/offer-comparison.xlsx hash=demo4 -->'],
+['k','Stakeholder statement','The head of IT considers the February move date realistic only with external support.'],
+['i','- Scope: functional · Evidence: single source · Confidence: medium'],['i','- ID: K6 · Valid since: 2026-10-28'],
+['ic','<!-- polaris-source: type=mail path=inbox/mail/archive/processed/2026-10-28-head-of-it.eml hash=demo6 -->'],['',''],
+['h','## Key figures / facts'],['k','Fact','42 virtual machines and 3 physical database servers have to move; two legacy applications run only on own hardware.'],
+['i','- Scope: cross-functional · Evidence: confirmed · Confidence: high'],['i','- ID: K2 · Valid since: 2026-10-05'],
+['ic','<!-- polaris-source: type=claude conversation_id=cl-demo-02 message_ids=m-11 -->'],['',''],
+['h','## Relevant insights'],['k','Hypothesis','Moving in two waves (test and development systems first) clearly lowers the outage risk but extends the project by about four weeks.'],
+['i','- Scope: cross-functional · Evidence: single source · Confidence: medium'],['i','- To check: assumption from a chat, not yet agreed with the provider.'],
+['i','- ID: K7 · Valid since: 2026-11-02'],['ic','<!-- polaris-source: type=chatgpt conversation_id=c-demo-03 message_ids=m-02,m-03 -->'],
+];
+const e=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+document.getElementById('t').innerHTML=L.map((x,i)=>{let b;
+ if(x[0]=='h')b=`<span class="h">${e(x[1])}</span>`;else if(x[0]=='c')b=`<span class="c">${e(x[1])}</span>`;
+ else if(x[0]=='k')b=`<span class="k">- ${x[1]}</span> ${e(x[2])}`;else if(x[0]=='i')b=`<span class="i">${e(x[1])}</span>`;
+ else if(x[0]=='ic')b=`<span class="i c">${e(x[1])}</span>`;else b='';
+ return `<div class="l"><span class="n">${i+1}</span>${b}</div>`}).join('');
+</script></body></html>

@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import layout
+from .i18n import t
 
 HOME = Path.home()
 BRIDGE_INBOX = HOME / "Downloads" / "polaris-inbox"
@@ -153,8 +154,8 @@ def _capture_problem(now: datetime) -> str | None:
     # Desktop-Meldung aus.
     if (ok_at is None or ok_at < err_at) and now - err_at < CAPTURE_ERROR_FRESH:
         local = err_at.astimezone().strftime("%H:%M")
-        return (f"ChatGPT-Schnittstelle um {local} nicht nutzbar ({err.get('error', '')[:100]}) - "
-                "Erfassung liest ersatzweise aus der Seite.")
+        return t("ChatGPT-Schnittstelle um {local} nicht nutzbar ({error}) - "
+                 "Erfassung liest ersatzweise aus der Seite.", local=local, error=err.get("error", "")[:100])
     return None
 
 
@@ -184,6 +185,10 @@ SOURCES_HINT = ("Falls ChatGPT hier nicht genutzt wird: in ~/.config/polaris/cur
                 "monitoring.chat_sources setzen, z. B. [claude] (siehe CHANGELOG).")
 
 
+def _sources_hint(sources_explicit: bool) -> str:
+    return "" if sources_explicit else " " + t(SOURCES_HINT)
+
+
 def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datetime | None = None,
             chat_sources: tuple[str, ...] = ("chatgpt", "claude"), sources_explicit: bool = True) -> dict:
     now = now or datetime.now(timezone.utc)
@@ -197,19 +202,23 @@ def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datet
                 latest = m
 
     warnings: list[str] = []
+    # Gesondert statt per Textsuche in den (uebersetzten) Warnungen: keine
+    # ChatGPT-Nachricht seit der Frist -> systemhealth zeigt rot.
+    silent = False
     days_since = None
     # 0 schaltet nur die Zeitpruefung aus, nicht die Quelle oder Bridge-Fehler.
     if projects and "chatgpt" in chat_sources and max_days_without_chatgpt > 0:
         if latest is None:
-            warnings.append("Noch keine ChatGPT-Nachricht archiviert."
-                            + ("" if sources_explicit else " " + SOURCES_HINT))
+            silent = True
+            warnings.append(t("Noch keine ChatGPT-Nachricht archiviert.") + _sources_hint(sources_explicit))
         else:
             days_since = (now.timestamp() - latest) / 86400
             if days_since > max_days_without_chatgpt:
+                silent = True
                 warnings.append(
-                    f"Seit {int(days_since)} Tagen keine ChatGPT-Nachricht mehr archiviert "
-                    f"(in keinem Projekt) - Firefox-Erweiterung, Berechtigung für chatgpt.com "
-                    f"und Native Host prüfen." + ("" if sources_explicit else " " + SOURCES_HINT)
+                    t("Seit {days} Tagen keine ChatGPT-Nachricht mehr archiviert "
+                      "(in keinem Projekt) - Firefox-Erweiterung, Berechtigung für chatgpt.com "
+                      "und Native Host prüfen.", days=int(days_since)) + _sources_hint(sources_explicit)
                 )
 
     inbox_stale = 0
@@ -226,30 +235,32 @@ def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datet
     # Datei behaelt die mtime aus der Inbox und war sonst evtl. sofort "zu alt";
     # Review Runde 3).
     if inbox_stale:
-        warnings.append(f"{inbox_stale} Datei(en) liegen seit über einer Stunde unverarbeitet in der Bridge-Inbox.")
+        warnings.append(t("{n} Datei(en) liegen seit über einer Stunde unverarbeitet in der Bridge-Inbox.",
+                          n=inbox_stale))
     if pending:
-        warnings.append(f"{pending} Nachricht(en) warten auf eine Projektzuordnung (polaris pending).")
+        warnings.append(t("{n} Nachricht(en) warten auf eine Projektzuordnung (polaris pending).", n=pending))
     if failed_recent:
-        warnings.append(f"{failed_recent} Datei(en) hat die Bridge abgelehnt (~/.local/share/polaris/failed/) - Grund im Bridge-Protokoll.")
+        warnings.append(t("{n} Datei(en) hat die Bridge abgelehnt (~/.local/share/polaris/failed/) - "
+                          "Grund im Bridge-Protokoll.", n=failed_recent))
     if log_errors:
-        warnings.append(f"{log_errors} Fehler im Bridge-Protokoll in den letzten 24 Stunden.")
+        warnings.append(t("{n} Fehler im Bridge-Protokoll in den letzten 24 Stunden.", n=log_errors))
     held = _held_back(now) if "chatgpt" in chat_sources else []
     if held:
         names = ", ".join(f"„{t}“" for t in held[:3]) + (" …" if len(held) > 3 else "")
-        warnings.append(
-            f"{len(held)} Chat(s) mit noch nicht übernommener letzter Antwort seit über 1 h: {names} – "
-            "Chat öffnen oder im Popup „Sync now“ (gelöschter Chat: `polaris held-back --clear …`)."
-        )
+        warnings.append(t(
+            "{n} Chat(s) mit noch nicht übernommener letzter Antwort seit über 1 h: {names} – "
+            "Chat öffnen oder im Popup „Sync now“ (gelöschter Chat: `polaris held-back --clear …`).",
+            n=len(held), names=names))
     capture = _capture_problem(now) if "chatgpt" in chat_sources else None
     if capture:
         warnings.append(capture)
     stuck = _stuck_retries(now) if chat_sources else []
     if stuck:
         example = stuck[0]
-        warnings.append(
-            f"{len(stuck)} Datei(en) lassen sich seit über einer Stunde nicht ablegen "
-            f"(z. B. {example[0]}: {example[1]}) - Projektordner/Mount prüfen."
-        )
+        warnings.append(t(
+            "{n} Datei(en) lassen sich seit über einer Stunde nicht ablegen "
+            "(z. B. {name}: {error}) - Projektordner/Mount prüfen.",
+            n=len(stuck), name=example[0], error=example[1]))
 
     return {
         "last_chatgpt_message_at": _iso(latest),
@@ -263,6 +274,7 @@ def collect(projects: dict[str, Path], max_days_without_chatgpt: int, now: datet
             "log_errors_last_24h": log_errors,
         },
         "warnings": warnings,
+        "chatgpt_silent": silent,
     }
 
 
@@ -282,7 +294,7 @@ def notify_once_per_day(health: dict, now: datetime | None = None) -> bool:
         return False
     try:
         subprocess.run(
-            ["notify-send", "-u", "critical", "-a", "Polaris Curator", "Polaris: Archivierung prüfen",
+            ["notify-send", "-u", "critical", "-a", "Polaris Curator", t("Polaris: Archivierung prüfen"),
              "\n".join(warnings)],
             check=False, timeout=10,
         )

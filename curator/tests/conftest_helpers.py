@@ -25,6 +25,9 @@ _atexit.register(shutil.rmtree, _RUN_TMP, True)
 import os as _os  # noqa: E402
 
 _os.environ["POLARIS_NO_NOTIFY"] = "1"
+# Erwartete Texte sind deutsch, unabhaengig von `language` in der echten
+# curator.yaml (i18n.py; test_i18n setzt die Sprache gezielt um).
+_os.environ["POLARIS_LANG"] = "de"
 
 from polaris_curator import config as _config  # noqa: E402
 from polaris_curator.config import CuratorConfig  # noqa: E402

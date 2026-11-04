@@ -152,7 +152,7 @@ GitHub so that your commits carry the noreply address.
 ## Typical reasons for a PR
 
 - ChatGPT or Claude change their web API or page, and capture breaks. See
-  the README, section "Repairing after ChatGPT or Claude changes"
+  `docs/browser-capture.md`, section "Repairing after ChatGPT or Claude changes"
   (`extension/chatgpt_api.js`, `extension/claude.js`, `extension/extractor.js`).
 - Bugs in bridge or curator that do not only affect your own setup.
 

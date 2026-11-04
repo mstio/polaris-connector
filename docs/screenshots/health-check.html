@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<!-- Nachgebaute englische Ansicht des Polaris-Widgets (Health Check); Quelle fuer health-check.png. -->
+<style>
+  :root{--bg:#1b130b;--line:#3d2e1d;--text:#e6d8bd;--muted:#9c8b70;--gold:#d8b46c;--ok:#8fbf6a}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:457px;height:501px;background:var(--bg);color:var(--text);font:10.6px/1.3 "JetBrainsMono Nerd Font",monospace;padding:10px 14px;overflow:hidden;border:1px solid var(--line)}
+  .hd{display:flex;justify-content:space-between;align-items:center;margin:4px 0 8px}
+  .hd b{font-size:13px} .hd span{color:var(--text);font-size:13px;letter-spacing:14px}
+  hr{border:0;border-top:1px solid var(--line);width:100px;margin:0 0 10px}
+  .g{margin-bottom:4px}
+  .g b{font-weight:600;font-size:12px;display:flex;align-items:center;gap:6px}
+  .g b:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  .g p{color:var(--muted);margin-left:14px}
+  .sys{color:var(--muted);margin:4px 0 8px}
+  h2{font-size:12px;margin:4px 0 6px}
+  .big{color:var(--gold);font-weight:700;font-size:12px;margin-bottom:6px}
+  .m{color:var(--muted);margin-bottom:4px}
+  .btn{margin-top:6px;border:1px solid var(--muted);border-radius:6px;text-align:center;padding:5px;font-size:12px}
+</style></head><body>
+  <div class="hd"><b>Health Check</b><span>↻×</span></div><hr>
+  <div class="g"><b>Capture</b><p>ChatGPT, Claude, extension, native host OK – last message 1 h ago</p></div>
+  <div class="g"><b>Project separation</b><p>no message in the wrong project</p></div>
+  <div class="g"><b>Curator</b><p>timer, curation steps, model, widget OK – timer active, last run successful</p></div>
+  <div class="g"><b>Storage &amp; backup</b><p>project folder, backup OK – snapshot 14 h ago, uploaded 14 h ago, doctor HEALTHY</p></div>
+  <div class="g"><b>Machine memory</b><p>consistent, 616 entries, mirrored just now</p></div>
+  <div class="g"><b>Security</b><p>no findings (checked 1 h ago)</p></div>
+  <div class="g"><b>Update</b><p>up to date (0.4.4)</p></div>
+  <div class="sys">Disk /: 45 % used, 158 GB free · disk /home: 66 % used, 76 GB free · systemd units: none failed · battery: 80 % · crashes: none new</div>
+  <hr><h2>Polaris Curator</h2>
+  <div class="big">1 of 10 projects open</div>
+  <div class="m">8 new chat messages · 0 new inbox files · 1 LLM call</div>
+  <div class="m">Automatic on · next run Wed 2026-11-04 21:30 CET</div>
+  <div class="btn">Curate all open projects</div>
+</body></html>

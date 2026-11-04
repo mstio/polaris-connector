@@ -13,7 +13,7 @@
 # Gedaechtnis) -> polaris-curator health. Wird der Health-Check durch das
 # Update rot, geht es zurueck auf den alten Commit und install.sh laeuft erneut.
 # Ohne git (altes Installationspaket, GitHub-ZIP) gibt es kein Update hier:
-# einmal auf einen git-Checkout umsteigen (README, "Switching from the install
+# einmal auf einen git-Checkout umsteigen (docs/install.md, "Switching from the install
 # bundle to a git checkout"). Danach zieht es auch die Bausteine aus eigenen
 # Repos mit (omarchy-backup, Widgets).
 set -uo pipefail
@@ -75,7 +75,7 @@ write_state() {  # behind local remote
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" >"$STATE.tmp" && mv -f "$STATE.tmp" "$STATE"
 }
 
-[ -d "$REPO/.git" ] || fail "$REPO ist kein git-Checkout. Einmal auf git umsteigen: README, Abschnitt \"Switching from the install bundle to a git checkout\"."
+[ -d "$REPO/.git" ] || fail "$REPO ist kein git-Checkout. Einmal auf git umsteigen: docs/install.md, Abschnitt \"Switching from the install bundle to a git checkout\"."
 upstream="$(g rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" ||
   fail "der Branch $(g branch --show-current) hat kein Upstream (git branch --set-upstream-to origin/main)"
 

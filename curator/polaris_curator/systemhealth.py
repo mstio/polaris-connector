@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import health as archive_health
 from . import integrity
+from .i18n import language, t
 
 HOME = Path.home()
 EXTENSION_ID = "polaris-chatgpt-connector@mstarchy.local"
@@ -70,24 +71,25 @@ def _age_days(iso: str | None, now: datetime) -> float | None:
 
 def _fmt_age(days: float | None) -> str:
     if days is None:
-        return "nie"
+        return t("nie")
     if days < 1 / 24:
-        return "gerade eben"
+        return t("gerade eben")
     if days < 1:
-        return f"vor {int(days * 24)} h"
-    return f"vor {int(days)} Tag(en)"
+        return t("vor {n} h", n=int(days * 24))
+    return t("vor {n} Tag(en)", n=int(days))
 
 
 def check_archive(projects: dict, max_days: int, sources_explicit: bool = True) -> dict:
     h = archive_health.collect(projects, max_days, chat_sources=("chatgpt",), sources_explicit=sources_explicit)
+    label = t("ChatGPT-Archivierung")
     if h["warnings"]:
-        level = "error" if any("keine ChatGPT-Nachricht" in w for w in h["warnings"]) else "warn"
-        return _c("chatgpt-archive", "ChatGPT-Archivierung", level, " ".join(h["warnings"]))
+        level = "error" if h.get("chatgpt_silent") else "warn"
+        return _c("chatgpt-archive", label, level, " ".join(h["warnings"]))
     last = h["last_chatgpt_message_at"]
     if last is None:
-        return _c("chatgpt-archive", "ChatGPT-Archivierung", "ok", "noch keine ChatGPT-Nachricht archiviert")
+        return _c("chatgpt-archive", label, "ok", t("noch keine ChatGPT-Nachricht archiviert"))
     days = _age_days(last, datetime.now(timezone.utc))
-    return _c("chatgpt-archive", "ChatGPT-Archivierung", "ok", f"letzte Nachricht {_fmt_age(days)}")
+    return _c("chatgpt-archive", label, "ok", t("letzte Nachricht {age}", age=_fmt_age(days)))
 
 
 def check_bridge_without_chatgpt(projects: dict) -> dict:
@@ -95,7 +97,7 @@ def check_bridge_without_chatgpt(projects: dict) -> dict:
     h = archive_health.collect(projects, 0, chat_sources=("claude",))
     if h["warnings"]:
         return _c("bridge", "Bridge", "warn", " ".join(h["warnings"]))
-    return _c("bridge", "Bridge", "ok", "keine Auffälligkeiten")
+    return _c("bridge", "Bridge", "ok", t("keine Auffälligkeiten"))
 
 
 def check_claude_archive(projects: dict, max_days: int, now: datetime, required: bool = False) -> dict:
@@ -114,19 +116,20 @@ def check_claude_archive(projects: dict, max_days: int, now: datetime, required:
         if m is not None:
             count += 1
             latest = m if latest is None or m > latest else latest
+    label = t("Claude-Archivierung")
     if latest is None:
         if required and projects:
-            return _c("claude-archive", "Claude-Archivierung", "error",
-                      "noch keine Claude-Nachricht archiviert – Erweiterung, Zugriff auf claude.ai und "
-                      "Projektzuordnung prüfen (oder claude aus monitoring.chat_sources entfernen)")
-        return _c("claude-archive", "Claude-Archivierung", "ok", "noch keine Claude-Nachricht archiviert")
+            return _c("claude-archive", label, "error",
+                      t("noch keine Claude-Nachricht archiviert – Erweiterung, Zugriff auf claude.ai und "
+                        "Projektzuordnung prüfen (oder claude aus monitoring.chat_sources entfernen)"))
+        return _c("claude-archive", label, "ok", t("noch keine Claude-Nachricht archiviert"))
     days = (now.timestamp() - latest) / 86400
-    detail = f"letzte Nachricht {_fmt_age(days)} ({count} Projekt(e) mit Claude-Quelle)"
+    detail = t("letzte Nachricht {age} ({n} Projekt(e) mit Claude-Quelle)", age=_fmt_age(days), n=count)
     if days > max_days:
-        return _c("claude-archive", "Claude-Archivierung", "warn",
-                  f"seit {int(days)} Tagen keine Claude-Nachricht – falls du Claude genutzt hast: "
-                  "Erweiterung/Berechtigung für claude.ai und Sync im Popup prüfen")
-    return _c("claude-archive", "Claude-Archivierung", "ok", detail)
+        return _c("claude-archive", label, "warn",
+                  t("seit {days} Tagen keine Claude-Nachricht – falls du Claude genutzt hast: "
+                    "Erweiterung/Berechtigung für claude.ai und Sync im Popup prüfen", days=int(days)))
+    return _c("claude-archive", label, "ok", detail)
 
 
 def check_journals(projects: dict) -> dict:
@@ -134,7 +137,7 @@ def check_journals(projects: dict) -> dict:
     beschaedigt -> rot, das Projekt wird dann nicht (vollstaendig) kuratiert."""
     from . import journal
 
-    label = "Kurationsschritte"
+    label = t("Kurationsschritte")
     stuck = []
     now = datetime.now(timezone.utc).timestamp()
     for path in sorted({p.resolve() for p in projects.values()}):
@@ -145,13 +148,13 @@ def check_journals(projects: dict) -> dict:
             journal.pending(path)
             age = now - jp.stat().st_mtime
             if age > 3600:
-                stuck.append(f"{path.name} (offen seit {int(age // 3600)} h)")
+                stuck.append(t("{name} (offen seit {h} h)", name=path.name, h=int(age // 3600)))
         except (journal.JournalConflict, OSError) as exc:
             stuck.append(f"{path.name} ({exc})")
     if stuck:
         return _c("journal", label, "error",
-                  "unterbrochen: " + ", ".join(stuck) + " – `polaris-curator journal <Projekt>`")
-    return _c("journal", label, "ok", "keiner offen")
+                  t("unterbrochen: {items} – `polaris-curator journal <Projekt>`", items=", ".join(stuck)))
+    return _c("journal", label, "ok", t("keiner offen"))
 
 
 PENDING_STALE_DAYS = 7
@@ -167,7 +170,7 @@ def check_curation(projects: dict, now: datetime | None = None) -> dict:
 
     from . import state as state_mod
 
-    label = "Kuration"
+    label = t("Kuration")
     today = (now or datetime.now(timezone.utc)).astimezone().date()
     problems: list[str] = []
     for path in sorted({p.resolve() for p in projects.values()}):
@@ -181,7 +184,7 @@ def check_curation(projects: dict, now: datetime | None = None) -> dict:
                 pass  # meldet schon die Zeile "Projekttrennung"
             elif rec.get("errors") or rec.get("aborted_reason"):
                 first = (rec.get("errors") or [rec.get("aborted_reason")])[0]
-                problems.append(f"{path.name}: letzter Lauf mit Fehler ({str(first)[:90]})")
+                problems.append(t("{name}: letzter Lauf mit Fehler ({error})", name=path.name, error=str(first)[:90]))
             for w in rec.get("warnings") or []:
                 problems.append(f"{path.name}: {w[:110]}")
             oldest = rec.get("oldest_pending_day")
@@ -191,7 +194,8 @@ def check_curation(projects: dict, now: datetime | None = None) -> dict:
                 except ValueError:
                     age = 0
                 if age > PENDING_STALE_DAYS:
-                    problems.append(f"{path.name}: Rückstand seit {age} Tagen ({rec.get('pending_chat_batches')} Tages-Batches)")
+                    problems.append(t("{name}: Rückstand seit {age} Tagen ({n} Tages-Batches)",
+                                      name=path.name, age=age, n=rec.get("pending_chat_batches")))
         try:
             from . import config as config_mod, context as context_mod
 
@@ -203,8 +207,9 @@ def check_curation(projects: dict, now: datetime | None = None) -> dict:
                 if full and fp.is_file():
                     share = context_mod.index_share(fp.read_text(encoding="utf-8"), full, is_dec, cap)
                     if share > 0.5:
-                        problems.append(f"{path.name}/{fname}: Verzeichnis belegt {int(share * 100)} % des "
-                                        "Kontext-Budgets – aufräumen (compact / review-loops) oder full_context_chars erhöhen")
+                        problems.append(t("{name}/{file}: Verzeichnis belegt {pct} % des Kontext-Budgets – "
+                                          "aufräumen (compact / review-loops) oder full_context_chars erhöhen",
+                                          name=path.name, file=fname, pct=int(share * 100)))
         except Exception:  # noqa: BLE001 - nur Anzeige
             pass
         try:
@@ -213,11 +218,11 @@ def check_curation(projects: dict, now: datetime | None = None) -> dict:
         except Exception:  # noqa: BLE001 - nur Anzeige
             repeated = []
         if repeated:
-            problems.append(f"{path.name}: {len(repeated)} Einheit(en) scheitern wiederholt")
+            problems.append(t("{name}: {n} Einheit(en) scheitern wiederholt", name=path.name, n=len(repeated)))
     if problems:
         uniq = list(dict.fromkeys(problems))
         return _c("curation", label, "warn", " · ".join(uniq[:3]) + (f" (+{len(uniq) - 3})" if len(uniq) > 3 else ""))
-    return _c("curation", label, "ok", "keine Auffälligkeiten")
+    return _c("curation", label, "ok", t("keine Auffälligkeiten"))
 
 
 def check_separation(mappings: dict | None = None) -> dict:
@@ -226,29 +231,30 @@ def check_separation(mappings: dict | None = None) -> dict:
     (der Curator laesst betroffene Projekte dann aus); gelb, wenn die Bridge
     einen solchen Versuch abgewehrt hat oder ein Chat-Verzeichnis fremde IDs
     fuehrt."""
-    label = "Projekttrennung"
+    label = t("Projekttrennung")
     try:
         findings = integrity.scan(mappings)
     except OSError as exc:
-        return _c("separation", label, "warn", f"Prüfung fehlgeschlagen: {exc}")
+        return _c("separation", label, "warn", t("Prüfung fehlgeschlagen: {exc}", exc=exc))
     blocking = [f for f in findings if f.blocking]
     if blocking:
         projects = sorted({p for f in blocking for p in f.projects})
         return _c("separation", label, "error",
-                  f"{len(blocking)} Nachricht(en) im falschen Projekt/Chat ({', '.join(projects)}) – "
-                  f"betroffene Projekte werden nicht kuratiert; z. B. {blocking[0].summary()}")
+                  t("{n} Nachricht(en) im falschen Projekt/Chat ({projects}) – "
+                    "betroffene Projekte werden nicht kuratiert; z. B. {example}",
+                    n=len(blocking), projects=", ".join(projects), example=blocking[0].summary()))
     notes = []
     for kind, text in (
-        ("index_mismatch", "Chat-Verzeichnis(se) mit fremden IDs"),
-        ("unreadable", "unlesbare Nachrichtendatei(en)"),
-        ("unknown_project", "Nachricht(en) ohne zugeordnete Projekt-ID (werden nicht kuratiert)"),
+        ("index_mismatch", t("Chat-Verzeichnis(se) mit fremden IDs")),
+        ("unreadable", t("unlesbare Nachrichtendatei(en)")),
+        ("unknown_project", t("Nachricht(en) ohne zugeordnete Projekt-ID (werden nicht kuratiert)")),
     ):
         hits = [f for f in findings if f.kind == kind]
         if hits:
             notes.append(f"{len(hits)} {text} ({', '.join(sorted({p for f in hits for p in f.projects}))})")
     if notes:
         return _c("separation", label, "warn", "; ".join(notes))
-    return _c("separation", label, "ok", "keine Nachricht im falschen Projekt")
+    return _c("separation", label, "ok", t("keine Nachricht im falschen Projekt"))
 
 
 def _firefox_profiles() -> list[Path]:
@@ -263,6 +269,7 @@ def _version_tuple(v: str) -> tuple:
 
 
 def check_extension(chat_sources: tuple[str, ...] = ("chatgpt", "claude"), claude_required: bool = False) -> dict:
+    label = t("Firefox-Erweiterung")
     for profile in _firefox_profiles():
         try:
             addons = json.loads((profile / "extensions.json").read_text(encoding="utf-8")).get("addons", [])
@@ -281,33 +288,34 @@ def check_extension(chat_sources: tuple[str, ...] = ("chatgpt", "claude"), claud
             except (OSError, ValueError):
                 pass
             if a.get("userDisabled") or a.get("appDisabled"):
-                return _c("extension", "Firefox-Erweiterung", "error", f"v{version} ist deaktiviert")
+                return _c("extension", label, "error", t("v{version} ist deaktiviert", version=version))
             if not a.get("active", True) and not a.get("visible", True):
                 # Von einer temporaer (about:debugging) geladenen Version mit
                 # derselben ID ueberlagert; deren Rechte stehen nicht hier.
-                return _c("extension", "Firefox-Erweiterung", "warn",
-                          f"läuft als temporär geladene Version (installiert: v{version}) – fällt nach "
-                          "einem Firefox-Neustart weg; neue Version signieren lassen und installieren")
+                return _c("extension", label, "warn",
+                          t("läuft als temporär geladene Version (installiert: v{version}) – fällt nach "
+                            "einem Firefox-Neustart weg; neue Version signieren lassen und installieren",
+                            version=version))
             if "chatgpt" in chat_sources and not any("chatgpt.com" in o for o in origins):
-                return _c("extension", "Firefox-Erweiterung", "error",
-                          f"v{version}: Zugriff auf chatgpt.com nicht erteilt – exportiert nur nach Klick "
-                          "(about:addons → Polaris → Berechtigungen)")
+                return _c("extension", label, "error",
+                          t("v{version}: Zugriff auf chatgpt.com nicht erteilt – exportiert nur nach Klick "
+                            "(about:addons → Polaris → Berechtigungen)", version=version))
             if _version_tuple(version) < MIN_EXTENSION_VERSION:
-                return _c("extension", "Firefox-Erweiterung", "warn",
-                          f"installiert ist v{version}; eine neuere Version läuft höchstens temporär "
-                          "und fällt nach einem Firefox-Neustart weg (signieren lassen)")
+                return _c("extension", label, "warn",
+                          t("installiert ist v{version}; eine neuere Version läuft höchstens temporär "
+                            "und fällt nach einem Firefox-Neustart weg (signieren lassen)", version=version))
             if "claude" in chat_sources and _version_tuple(version) < (0, 2, 0):
-                return _c("extension", "Firefox-Erweiterung", "error",
-                          f"v{version} unterstützt Claude-Erfassung noch nicht")
+                return _c("extension", label, "error",
+                          t("v{version} unterstützt Claude-Erfassung noch nicht", version=version))
             if "claude" in chat_sources and not any("claude.ai" in o for o in origins):
-                return _c("extension", "Firefox-Erweiterung", "error" if claude_required else "warn",
-                          f"v{version}: Zugriff auf claude.ai nicht erteilt – Claude-Export ruht "
-                          "(Polaris-Symbol auf claude.ai anklicken → Zugriff erlauben)")
-            granted = " und ".join(domain for source, domain in
+                return _c("extension", label, "error" if claude_required else "warn",
+                          t("v{version}: Zugriff auf claude.ai nicht erteilt – Claude-Export ruht "
+                            "(Polaris-Symbol auf claude.ai anklicken → Zugriff erlauben)", version=version))
+            granted = t(" und ").join(domain for source, domain in
                                    (("chatgpt", "chatgpt.com"), ("claude", "claude.ai"))
                                    if source in chat_sources and any(domain in o for o in origins))
-            return _c("extension", "Firefox-Erweiterung", "ok", f"v{version}, Zugriff auf {granted} erteilt")
-    return _c("extension", "Firefox-Erweiterung", "error", "nicht installiert")
+            return _c("extension", label, "ok", t("v{version}, Zugriff auf {granted} erteilt", version=version, granted=granted))
+    return _c("extension", label, "error", t("nicht installiert"))
 
 
 def check_native_host() -> dict:
@@ -315,11 +323,11 @@ def check_native_host() -> dict:
         manifest = json.loads(NATIVE_MANIFEST.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return _c("native-host", "Native Host", "warn",
-                  "nicht registriert – Erweiterung nutzt Downloads (bridge/install-native-host.sh)")
+                  t("nicht registriert – Erweiterung nutzt Downloads (bridge/install-native-host.sh)"))
     path = Path(manifest.get("path", ""))
     if not (path.is_file() and os.access(path, os.X_OK)):
-        return _c("native-host", "Native Host", "warn", f"registriert, aber {path} fehlt/nicht ausführbar")
-    return _c("native-host", "Native Host", "ok", "registriert")
+        return _c("native-host", "Native Host", "warn", t("registriert, aber {path} fehlt/nicht ausführbar", path=path))
+    return _c("native-host", "Native Host", "ok", t("registriert"))
 
 
 def _tree(root: Path) -> dict[str, bytes]:
@@ -337,12 +345,12 @@ def check_widget(src: Path | None = None, active: Path | None = None) -> dict | 
     try:
         want, have = _tree(src), _tree(active)
     except OSError as exc:
-        return _c("widget", "Widget", "warn", f"Kopie nicht lesbar: {exc}")
+        return _c("widget", "Widget", "warn", t("Kopie nicht lesbar: {exc}", exc=exc))
     differ = sorted(n for n in want.keys() | have.keys() if want.get(n) != have.get(n))
     if differ:
         names = ", ".join(differ[:3]) + (" …" if len(differ) > 3 else "")
-        return _c("widget", "Widget", "warn", f"Kopie veraltet ({names}) – {WIDGET_SYNC_HINT}")
-    return _c("widget", "Widget", "ok", "Kopie aktuell")
+        return _c("widget", "Widget", "warn", t("Kopie veraltet ({names}) – {hint}", names=names, hint=t(WIDGET_SYNC_HINT)))
+    return _c("widget", "Widget", "ok", t("Kopie aktuell"))
 
 
 UPDATE_STATE = HOME / ".local" / "state" / "polaris" / "update-check.json"
@@ -368,21 +376,22 @@ def check_update(now: datetime) -> dict | None:
             subprocess.run([str(UPDATE_SCRIPT), "--check"], capture_output=True, timeout=70, check=False)
             state = json.loads(UPDATE_STATE.read_text(encoding="utf-8"))
         except (OSError, ValueError, subprocess.SubprocessError):
-            return _c("update", "Update", "ok", "Prüfung nicht möglich (offline?) – polaris update --check")
+            return _c("update", "Update", "ok", t("Prüfung nicht möglich (offline?) – polaris update --check"))
     if int(state.get("behind") or 0) > 0:
         return _c("update", "Update", "warn",
-                  f"verfügbar: {state.get('local', '?')} → {state.get('remote', '?')} – polaris update")
-    return _c("update", "Update", "ok", f"aktuell ({state.get('local', '?')})")
+                  t("verfügbar: {local} → {remote} – polaris update",
+                    local=state.get("local", "?"), remote=state.get("remote", "?")))
+    return _c("update", "Update", "ok", t("aktuell ({local})", local=state.get("local", "?")))
 
 
 def check_curator_timer() -> dict:
     result = _systemctl_user("show", "polaris-curator.service", "--property=Result", "--value")
     enabled = _systemctl_user("is-enabled", "polaris-curator.timer")
     if enabled != "enabled":
-        return _c("curator", "Curator", "error", "Timer nicht aktiviert")
+        return _c("curator", "Curator", "error", t("Timer nicht aktiviert"))
     if result and result != "success":
-        return _c("curator", "Curator", "warn", f"letzter Timer-Lauf: {result}")
-    return _c("curator", "Curator", "ok", "Timer aktiv, letzter Lauf erfolgreich")
+        return _c("curator", "Curator", "warn", t("letzter Timer-Lauf: {result}", result=result))
+    return _c("curator", "Curator", "ok", t("Timer aktiv, letzter Lauf erfolgreich"))
 
 
 def check_llm() -> dict:
@@ -390,20 +399,22 @@ def check_llm() -> dict:
     Aufruf (kostet nichts); Anmeldung prueft `polaris-curator llm-check --call`."""
     from . import config as config_mod, llm
 
+    label = t("Modell")
     try:
         cfg = config_mod.load_config()
     except Exception as e:  # noqa: BLE001 - kaputte curator.yaml
-        return _c("llm", "Modell", "error", f"curator.yaml unlesbar: {e}")
+        return _c("llm", label, "error", t("curator.yaml unlesbar: {e}", e=e))
     if cfg.runtime not in llm.RUNTIMES:
-        return _c("llm", "Modell", "error", f"unbekannte runtime {cfg.runtime!r}")
+        return _c("llm", label, "error", t("unbekannte runtime {runtime!r}", runtime=cfg.runtime))
     bins = llm.runtime_binaries(cfg)
     missing = [b for b, path in bins.items() if path is None]
     main = llm.main_binary(cfg)
     if main in missing:
-        return _c("llm", "Modell", "error", f"{main} fehlt – polaris-curator llm-check")
+        return _c("llm", label, "error", t("{main} fehlt – polaris-curator llm-check", main=main))
     if missing:
-        return _c("llm", "Modell", "warn", f"{cfg.runtime} {cfg.model}; {', '.join(missing)} (Ersatz/Prüfer) fehlt")
-    return _c("llm", "Modell", "ok", f"{cfg.runtime} {cfg.model}")
+        return _c("llm", label, "warn", t("{runtime} {model}; {missing} (Ersatz/Prüfer) fehlt",
+                                         runtime=cfg.runtime, model=cfg.model, missing=", ".join(missing)))
+    return _c("llm", label, "ok", f"{cfg.runtime} {cfg.model}")
 
 
 def check_backup(now: datetime) -> dict:
@@ -411,25 +422,26 @@ def check_backup(now: datetime) -> dict:
         # Optionaler Baustein (seit 2026-10-07): auf Rechnern ohne
         # omarchy-backup kein Fehler, sondern ein klarer Hinweis.
         if shutil.which("omarchy-backup") is None:
-            return _c("backup", "omarchy-backup", "ok", "nicht eingerichtet (optional)")
-        return _c("backup", "omarchy-backup", "warn", "installiert, aber noch kein Snapshot")
+            return _c("backup", "omarchy-backup", "ok", t("nicht eingerichtet (optional)"))
+        return _c("backup", "omarchy-backup", "warn", t("installiert, aber noch kein Snapshot"))
     try:
         state = json.loads(BACKUP_STATE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return _c("backup", "omarchy-backup", "error", "Zustandsdatei unlesbar")
+        return _c("backup", "omarchy-backup", "error", t("Zustandsdatei unlesbar"))
     snaps = state.get("snapshots") or []
     last = max((s.get("created_at", "") for s in snaps), default="")
     pushed = max((s.get("created_at", "") for s in snaps if s.get("remote_pushed")), default="")
     last_days, pushed_days = _age_days(last or None, now), _age_days(pushed or None, now)
     doctor = state.get("last_doctor_status") or "?"
     result = _systemctl_user("show", "omarchy-backup-snapshot.service", "--property=Result", "--value")
-    detail = f"Snapshot {_fmt_age(last_days)}, hochgeladen {_fmt_age(pushed_days)}, doctor {doctor}"
+    detail = t("Snapshot {last}, hochgeladen {pushed}, doctor {doctor}",
+               last=_fmt_age(last_days), pushed=_fmt_age(pushed_days), doctor=doctor)
     if doctor not in ("HEALTHY", "?"):
         return _c("backup", "omarchy-backup", "error", detail)
     if pushed_days is None or pushed_days > 7:
         return _c("backup", "omarchy-backup", "error", detail)
     if (last_days or 99) > 2 or (pushed_days or 99) > 2 or (result and result != "success"):
-        suffix = f", letzter Lauf: {result}" if result and result != "success" else ""
+        suffix = t(", letzter Lauf: {result}", result=result) if result and result != "success" else ""
         return _c("backup", "omarchy-backup", "warn", detail + suffix)
     return _c("backup", "omarchy-backup", "ok", detail)
 
@@ -485,8 +497,9 @@ def check_mount() -> dict:
     existiert). Bei rclone-Mounts zusaetzlich der Upload-Stau."""
     roots = [Path(str(r)).expanduser() for r in (_read_polaris_yaml("config.yaml").get("project_roots") or [])]
     if not roots:
-        return _c("mount", "Projektordner", "warn", "keine project_roots konfiguriert – polaris roots add <Ordner>")
-    label = "Projektordner (" + ", ".join(str(r).replace(str(HOME), "~", 1) for r in roots) + ")"
+        return _c("mount", t("Projektordner"), "warn",
+                  t("keine project_roots konfiguriert – polaris roots add <Ordner>"))
+    label = t("Projektordner ({roots})", roots=", ".join(str(r).replace(str(HOME), "~", 1) for r in roots))
     mapped = [Path(str(e.get("local_path"))).expanduser()
               for e in (_read_polaris_yaml("projects.yaml").get("projects") or {}).values()
               if isinstance(e, dict) and e.get("status") == "ok" and e.get("local_path")]
@@ -495,39 +508,41 @@ def check_mount() -> dict:
         short = str(root).replace(str(HOME), "~", 1)
         fstype = _fstype(root) if root.is_dir() else ""
         rclone = fstype.startswith("fuse.rclone")
-        hint = "Laufwerk eingehängt?"
+        hint = t("Laufwerk eingehängt?")
         if not root.is_dir():
-            return _c("mount", label, "error", f"{short} fehlt – {hint}")
+            return _c("mount", label, "error", t("{short} fehlt – {hint}", short=short, hint=hint))
         missing = [m for m in mapped if m.parent == root and not m.is_dir()]
         if missing:
             return _c("mount", label, "error",
-                      f"{len(missing)} zugeordnete(r) Projektordner unter {short} fehlt – {hint}")
+                      t("{n} zugeordnete(r) Projektordner unter {short} fehlt – {hint}",
+                        n=len(missing), short=short, hint=hint))
         if rclone:
             pending = _upload_backlog()
             if pending:
                 n, oldest_h = pending
                 level = "error" if oldest_h >= 24 else "warn"
                 return _c("mount", label, level,
-                          f"eingehängt, aber {n} Datei(en) seit {oldest_h} h nicht hochgeladen – rclone-Log prüfen")
-            kinds.append("rclone eingehängt")
+                          t("eingehängt, aber {n} Datei(en) seit {h} h nicht hochgeladen – rclone-Log prüfen",
+                            n=n, h=oldest_h))
+            kinds.append(t("rclone eingehängt"))
         else:
-            kinds.append("erreichbar")
+            kinds.append(t("erreichbar"))
     return _c("mount", label, "ok", ", ".join(dict.fromkeys(kinds)))
 
 
 def check_memory() -> dict:
     """Maschinengedaechtnis ~/.config/ai-agents per memlint (deterministisch, stdlib)."""
-    label = "Maschinengedächtnis"
+    label = t("Maschinengedächtnis")
     if not MEMLINT.is_file():
         if not MEMLINT.parent.parent.is_dir():
-            return _c("memory", label, "ok", "nicht eingerichtet (optional)")
-        return _c("memory", label, "warn", f"{MEMLINT} fehlt")
+            return _c("memory", label, "ok", t("nicht eingerichtet (optional)"))
+        return _c("memory", label, "warn", t("{path} fehlt", path=MEMLINT))
     try:
         proc = subprocess.run(["python3", str(MEMLINT), "--json"], capture_output=True, text=True, timeout=30,
                               env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         report = json.loads(proc.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
-        return _c("memory", label, "warn", "memlint konnte nicht ausgeführt werden")
+        return _c("memory", label, "warn", t("memlint konnte nicht ausgeführt werden"))
     findings = report.get("findings") or []
     errors = [f for f in findings if f.get("level") == "error"]
     warnings = [f for f in findings if f.get("level") != "error"]
@@ -535,10 +550,11 @@ def check_memory() -> dict:
         first = errors[0]
         level = "error" if any(f.get("check") in MEMLINT_SEVERE for f in errors) else "warn"
         return _c("memory", label, level,
-                  f"{len(errors)} Fehler (z. B. {first.get('check')}: {first.get('file')}) – memlint.py ausführen")
+                  t("{n} Fehler (z. B. {check}: {file}) – memlint.py ausführen",
+                    n=len(errors), check=first.get("check"), file=first.get("file")))
     # Groessenhinweise halten die Handoffs schlank, sind aber kein Ausfall.
-    note = f", {len(warnings)} Hinweis(e)" if warnings else ""
-    detail = f"konsistent, {report.get('stats', {}).get('tags', 0)} Einträge{note}"
+    note = t(", {n} Hinweis(e)", n=len(warnings)) if warnings else ""
+    detail = t("konsistent, {n} Einträge", n=report.get("stats", {}).get("tags", 0)) + note
     level, mirror = mirror_status()
     return _c("memory", label, level, detail + (f", {mirror}" if mirror else ""))
 
@@ -547,22 +563,22 @@ def check_security(now: datetime) -> dict:
     """Ergebnis des letzten Sicherheitsabgleichs (polaris-radar). Liest nur die
     Zustandsdatei, kein Netz. Gelb, nie rot: Die Befunde brauchen eine
     Bewertung (Fix-Stand, Betroffenheit), sie sind kein Ausfall."""
-    label = "Sicherheit"
+    label = t("Sicherheit")
     try:
         state = json.loads(SECURITY_STATE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return _c("security", label, "warn", "noch nicht geprüft – polaris-radar")
+        return _c("security", label, "warn", t("noch nicht geprüft – polaris-radar"))
     age = _age_days(state.get("checked_at"), now)
     finds = state.get("findings") or []
     if finds:
-        more = f" (+{len(finds) - 1} weitere)" if len(finds) > 1 else ""
+        more = t(" (+{n} weitere)", n=len(finds) - 1) if len(finds) > 1 else ""
         return _c("security", label, "warn",
                   f"{finds[0].get('text', '?')}{more} – handoff/omarchy-radar.md")
     if age is None or age > SECURITY_MAX_DAYS:
-        return _c("security", label, "warn", f"zuletzt geprüft {_fmt_age(age)} – polaris-radar")
+        return _c("security", label, "warn", t("zuletzt geprüft {age} – polaris-radar", age=_fmt_age(age)))
     if state.get("error"):
-        return _c("security", label, "warn", f"Abgleich unvollständig ({state['error']}) – polaris-radar")
-    return _c("security", label, "ok", f"keine Befunde (geprüft {_fmt_age(age)})")
+        return _c("security", label, "warn", t("Abgleich unvollständig ({error}) – polaris-radar", error=state["error"]))
+    return _c("security", label, "ok", t("keine Befunde (geprüft {age})", age=_fmt_age(age)))
 
 
 def _polaris_config_value(key: str):
@@ -578,14 +594,14 @@ def mirror_status(now: datetime | None = None) -> tuple[str, str]:
     try:
         state = json.loads(MEMORY_MIRROR_STATE.read_text())
     except (OSError, ValueError):
-        return "warn", "Spiegel noch nie gelaufen – polaris-memory-mirror"
+        return "warn", t("Spiegel noch nie gelaufen – polaris-memory-mirror")
     if state.get("last_result") == "mirror_newer":
-        return "warn", "Spiegel neuer als lokal – erst zurückholen (polaris-memory-mirror)"
+        return "warn", t("Spiegel neuer als lokal – erst zurückholen (polaris-memory-mirror)")
     days = _age_days(state.get("last_success"), now)
     if days is None or days > MEMORY_MIRROR_MAX_DAYS:
         why = f" ({state.get('detail')})" if state.get("last_result") != "ok" and state.get("detail") else ""
-        return "warn", f"Spiegel {_fmt_age(days)}{why}"
-    return "ok", f"gespiegelt {_fmt_age(days)}"
+        return "warn", t("Spiegel {age}", age=_fmt_age(days)) + why
+    return "ok", t("gespiegelt {age}", age=_fmt_age(days))
 
 
 # Typische Platzfresser, die sich gefahrlos verkleinern lassen (Idee aus
@@ -618,7 +634,9 @@ def _du_bytes(path: Path) -> int | None:
 
 def _fmt_size(n: int) -> str:
     gb = n / 2**30
-    return f"{gb:.1f} GB".replace(".", ",") if gb < 10 else f"{gb:.0f} GB"
+    if gb >= 10:
+        return f"{gb:.0f} GB"
+    return f"{gb:.1f} GB" if language() == "en" else f"{gb:.1f} GB".replace(".", ",")
 
 
 MOUNTINFO = Path("/proc/self/mountinfo")
@@ -694,13 +712,15 @@ def check_crashes(now: datetime | None = None, window_hours: int = CRASH_WINDOW_
             counts[comm] = counts.get(comm, 0) + 1
         top = sorted(counts.items(), key=lambda kv: -kv[1])
         listed = ", ".join(f"{c} ({n}×)" if n > 1 else c for c, n in top[:3])
-        more = " u. a." if len(top) > 3 else ""
-        return _c("crashes", "Abstürze", "warn",
-                  f"{len(recent)} seit {window_hours} h: {listed}{more} – coredumpctl list")
+        more = t(" u. a.") if len(top) > 3 else ""
+        return _c("crashes", t("Abstürze"), "warn",
+                  t("{n} seit {h} h: {listed}{more} – coredumpctl list",
+                    n=len(recent), h=window_hours, listed=listed, more=more))
     if dumps:
         last = max(dumps, key=lambda d: d[1])
-        return _c("crashes", "Abstürze", "ok", f"keine neuen (zuletzt {last[0]}, {_fmt_age(_age_days(last[1].isoformat(), now))})")
-    return _c("crashes", "Abstürze", "ok", "keine")
+        return _c("crashes", t("Abstürze"), "ok", t("keine neuen (zuletzt {name}, {age})", name=last[0],
+                                                    age=_fmt_age(_age_days(last[1].isoformat(), now))))
+    return _c("crashes", t("Abstürze"), "ok", t("keine"))
 
 
 def check_system(now: datetime | None = None) -> list[dict]:
@@ -713,15 +733,15 @@ def check_system(now: datetime | None = None) -> list[dict]:
             continue
         pct = usage.used * 100 / usage.total
         level = "error" if pct > 95 else "warn" if pct > 85 else "ok"
-        detail = f"{pct:.0f} % belegt, {usage.free / 2**30:.0f} GB frei"
+        detail = t("{pct:.0f} % belegt, {free:.0f} GB frei", pct=pct, free=usage.free / 2**30)
         dev = _backing_device(mount)
         if level != "ok" and dev not in seen_devs:
             big = reclaimable(mount)[:4]
             if big:
-                detail += " – größte Posten: " + ", ".join(
-                    f"{label} {_fmt_size(size)}" + (f" ({hint})" if hint else "") for label, size, hint in big)
+                detail += t(" – größte Posten: ") + ", ".join(
+                    f"{t(label)} {_fmt_size(size)}" + (f" ({hint})" if hint else "") for label, size, hint in big)
         seen_devs.add(dev)
-        items.append(_c(f"disk{mount}", f"Platte {mount}", level, detail))
+        items.append(_c(f"disk{mount}", t("Platte {mount}", mount=mount), level, detail))
     failed = []
     for scope in (["systemctl"], ["systemctl", "--user"]):
         try:
@@ -730,14 +750,14 @@ def check_system(now: datetime | None = None) -> list[dict]:
             continue
         failed += [line.split()[0] for line in out.splitlines() if line.strip()]
     items.append(_c("units", "systemd-Units", "warn" if failed else "ok",
-                    ("fehlgeschlagen: " + ", ".join(failed[:5])) if failed else "keine fehlgeschlagen"))
+                    t("fehlgeschlagen: {units}", units=", ".join(failed[:5])) if failed else t("keine fehlgeschlagen")))
     for bat in sorted(Path("/sys/class/power_supply").glob("BAT*")):
         try:
             cap = int((bat / "capacity").read_text().strip())
             status = (bat / "status").read_text().strip()
         except (OSError, ValueError):
             continue
-        items.append(_c("battery", "Akku", "warn" if cap < 15 and status == "Discharging" else "ok", f"{cap} % ({status})"))
+        items.append(_c("battery", t("Akku"), "warn" if cap < 15 and status == "Discharging" else "ok", f"{cap} % ({status})"))
         break
     crashes = check_crashes(now)
     if crashes:
@@ -771,7 +791,7 @@ def _group(gid: str, label: str, members: list[tuple[str, dict]], primary: dict 
         if len(members) == 1:
             detail = members[0][1]["detail"]
         else:
-            detail = f"{names} in Ordnung" + (f" – {primary['detail']}" if primary else "")
+            detail = t("{names} in Ordnung", names=names) + (f" – {primary['detail']}" if primary else "")
     else:
         bad = sorted(((n, c) for n, c in members if c["level"] != "ok"), key=lambda nc: -_LEVELS[nc[1]["level"]])
         prefix = len(members) > 1
@@ -784,11 +804,12 @@ def group_components(checks: list[dict]) -> list[dict]:
     used: set[str] = set()
     out = []
     for gid, label, parts, primary_id in GROUPS:
-        members = [(name, by_id[pid]) for name, pid in parts if pid in by_id]
+        # Namen aus GROUPS sind deutsche Literale; Uebersetzung erst hier.
+        members = [(t(name), by_id[pid]) for name, pid in parts if pid in by_id]
         if not members:
             continue
         used.update(pid for _n, pid in parts)
-        out.append(_group(gid, label, members, by_id.get(primary_id)))
+        out.append(_group(gid, t(label), members, by_id.get(primary_id)))
     # Unbekannte (neu hinzugekommene) Pruefungen nie verschlucken.
     out.extend(c for c in checks if c["id"] not in used)
     return out
@@ -797,7 +818,7 @@ def group_components(checks: list[dict]) -> list[dict]:
 def check_config(problems: tuple[str, ...]) -> dict | None:
     if not problems:
         return None
-    return _c("chat-sources", "Chatquellen-Konfiguration", "error", " ".join(problems))
+    return _c("chat-sources", t("Chatquellen-Konfiguration"), "error", " ".join(problems))
 
 
 def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_claude: int = 7,
@@ -830,6 +851,8 @@ def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_clau
     worst = max((_LEVELS[c["level"]] for c in checks + system), default=0)
     return {
         "generated_at": now.isoformat(),
+        # Fuer das Widget, das seine festen Texte selbst uebersetzt.
+        "language": language(),
         "level": {0: "ok", 1: "warn", 2: "error"}[worst],
         "components": group_components(checks),
         "checks": checks,

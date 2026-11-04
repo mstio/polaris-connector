@@ -20,6 +20,10 @@
 #                codex, falls installiert, sonst claude
 #   --chat-sources  Browser-Chats fuer eine NEU anzulegende curator.yaml;
 #                unabhaengig von der Curator-Runtime. Ohne Option gilt die Vorlage.
+#   --language   Sprache von Widget und Health Check fuer eine NEU anzulegende
+#                curator.yaml: en oder de. Standard: de bei deutscher
+#                Systemsprache (LANG=de_*), sonst en. Spaeter: language: in
+#                ~/.config/polaris/curator.yaml
 #   --no-units   systemd-Units nicht installieren/aktivieren
 #   --no-widget  Omarchy-Bar-Widgets nicht installieren (Health Check, Backup,
 #                Agenten-Starter)
@@ -54,7 +58,7 @@
 # Abschaltbar mit --no-widget, --no-dock, --no-backup. Ersetzte Dateien werden
 # vorher nach ~/.local/share/polaris/install-backups/<Zeit>/ gesichert.
 # Die Firefox-Erweiterung selbst (AMO, signiert) wird von Hand installiert,
-# siehe README "Installing the extension".
+# siehe docs/browser-capture.md "Installing the extension".
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -82,13 +86,14 @@ OB_PLUGIN_URL="https://github.com/mstio/mst.omarchy-backup.git"
 AL_URL="https://github.com/mstio/mst.agent-launchers.git"
 
 ORIG_ARGS=("$@")  # fuer den Neustart aus dem App-Ordner (die Schleife verbraucht "$@")
-ONLY_EXISTING=0 DRY=0 PROJECTS="" RUNTIME="" CHAT_SOURCES="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR=""
+ONLY_EXISTING=0 DRY=0 PROJECTS="" RUNTIME="" UI_LANG="" CHAT_SOURCES="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR=""
 GUIDED=0; [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ] && GUIDED=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
     --projects) PROJECTS="${2:?--projects braucht einen Ordner}"; shift ;;
     --runtime) RUNTIME="${2:?--runtime braucht codex|claude|command}"; shift ;;
+    --language) UI_LANG="${2:?--language braucht en|de}"; shift ;;
     --chat-sources) CHAT_SOURCES="${2:?--chat-sources braucht both|chatgpt|claude|none}"; shift ;;
     --no-units) UNITS=0 ;;
     --no-widget) WIDGET=0 ;;
@@ -108,6 +113,9 @@ while [ $# -gt 0 ]; do
 done
 case "$RUNTIME" in ""|codex|claude|command) ;; *) echo "--runtime: codex, claude oder command" >&2; exit 2 ;; esac
 case "$CHAT_SOURCES" in ""|both|chatgpt|claude|none) ;; *) echo "--chat-sources: both, chatgpt, claude oder none" >&2; exit 2 ;; esac
+# Sprache fuer eine neue curator.yaml: deutsche Systemsprache -> de, sonst en.
+if [ -z "${UI_LANG:-}" ]; then case "${LANG:-}" in de_*|de) UI_LANG=de ;; *) UI_LANG=en ;; esac; fi
+case "$UI_LANG" in en|de) ;; *) echo "--language: en oder de" >&2; exit 2 ;; esac
 
 # Ohne .git gestartet (GitHub-ZIP, altes Installationspaket): Die
 # Programmdateien kommen an einen festen Ort, damit Befehle, Units und Native
@@ -315,6 +323,7 @@ TXT
   say "  Projektordner:       $(tilde "${PROJECTS:-(spaeter)}")"
   say "  Curator-Modell:      $RUNTIME (nur fuer eine neue curator.yaml)"
   say "  Browser-Chatquellen: ${CHAT_SOURCES:-aus Vorlage} (nur fuer eine neue curator.yaml)"
+  say "  Sprache:             $UI_LANG (nur fuer eine neue curator.yaml)"
   say "  Hintergrunddienste:  $([ "$UNITS" = 1 ] && echo ja || echo nein)"
   say "  Widgets:             $([ "$WIDGET" = 1 ] && echo ja || echo nein)"
   say "  Dock (omadock):      $([ "$DOCK" = 1 ] && echo ja || echo nein)"
@@ -509,6 +518,7 @@ else
     esac
     run sed -i "s/^  chat_sources: .*/  chat_sources: $source_list/" "$POLARIS_CFG/curator.yaml"
   fi
+  run sed -i "s/^language: .*/language: $UI_LANG/" "$POLARIS_CFG/curator.yaml"
   say "  angelegt aus $(basename "$tmpl")"
 fi
 
@@ -843,7 +853,7 @@ if [ "$CAPTURE_ENABLED" = 1 ]; then
     say "  - Firefox-Erweiterung: firefox '$XPI'"
     say "    danach in about:addons Zugriff auf die konfigurierten Chatquellen erlauben"
   else
-    say "  - Firefox-Erweiterung installieren und Zugriff auf die konfigurierten Chatquellen erlauben (README)"
+    say "  - Firefox-Erweiterung installieren und Zugriff auf die konfigurierten Chatquellen erlauben (docs/browser-capture.md)"
   fi
 fi
 say "  - polaris roots add <Ordner>          # wo die Projektordner liegen"

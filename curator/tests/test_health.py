@@ -53,6 +53,17 @@ class TestHealth(unittest.TestCase):
             h = health.collect({"a": a}, 3)
             self.assertIn("Noch keine ChatGPT-Nachricht archiviert.", h["warnings"])
 
+    def test_english_warning_keeps_error_level(self):
+        # Rot haengt am Flag chatgpt_silent, nicht am (uebersetzten) Text.
+        from polaris_curator import systemhealth
+
+        with TempProject() as a, patch.dict(os.environ, {"POLARIS_LANG": "en"}):
+            h = health.collect({"a": a}, 3)
+            self.assertTrue(h["chatgpt_silent"])
+            self.assertIn("No ChatGPT message archived yet.", h["warnings"])
+            c = systemhealth.check_archive({"a": a}, 3)
+        self.assertEqual((c["label"], c["level"]), ("ChatGPT archive", "error"))
+
     def test_hint_on_chat_sources_only_without_explicit_list(self):
         with TempProject() as a:
             implicit = health.collect({"a": a}, 3, sources_explicit=False)["warnings"]

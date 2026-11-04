@@ -3,7 +3,7 @@
  *
  * Einziger Ort mit DOM-spezifischem Wissen ueber die ChatGPT-Weboberflaeche.
  * Wenn ChatGPT sein UI aendert, muss in der Regel nur diese Datei angepasst
- * werden (siehe README.md, Abschnitt "Extension reparieren").
+ * werden (siehe docs/browser-capture.md, "Repairing after ChatGPT or Claude changes").
  *
  * Struktur, VERIFIZIERT gegen echtes chatgpt.com-Markup (DevTools-Auszug
  * eines Assistant-Turns, eingebettet in ein ChatGPT-Project "Firma",

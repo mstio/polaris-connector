@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<!-- Nachbau des omarchy-backup-Widgets (Texte wie im echten Widget); Quelle fuer backup.png. -->
+<style>
+  :root{--bg:#1b130b;--line:#3d2e1d;--text:#e6d8bd;--muted:#9c8b70;--gold:#d8b46c;--ok:#8fbf6a;--chip:#3a2c1c}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:457px;height:501px;background:var(--bg);color:var(--text);font:10.6px/1.3 "JetBrainsMono Nerd Font",monospace;padding:10px 14px;overflow:hidden;border:1px solid var(--line)}
+  .hd{display:flex;justify-content:space-between;align-items:center;margin:4px 0 8px}
+  .hd b{font-size:13px} .hd span{font-size:13px}
+  hr{border:0;border-top:1px solid var(--line);width:100px;margin:6px 0 8px}
+  h4{font-size:10.6px;font-weight:700;letter-spacing:1px;color:var(--muted);margin:4px 0 6px}
+  .st{color:var(--ok);font-weight:700;font-size:12px;margin-bottom:3px}
+  .m{color:var(--muted);margin-bottom:3px}
+  .btns{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+  .b{border:1px solid var(--muted);border-radius:5px;padding:5px 9px;font-size:11.5px}
+  .b.on{background:var(--chip)}
+  .row{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;margin:6px 0}
+  .sw{width:32px;height:16px;border-radius:9px;background:var(--muted);position:relative}
+  .sw:after{content:"";position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:var(--text)}
+  .lbl{color:var(--muted);margin:5px 0 4px}
+</style></head><body>
+  <div class="hd"><b>Omarchy Backup</b><span>✕</span></div><hr>
+  <h4>STATUS</h4>
+  <div class="st">GREEN</div>
+  <div class="m">Matches your baseline -- no drift detected. Nothing to do.</div>
+  <div class="m">Baseline: snapshot-20261104-071512 · 3/3 snapshots</div>
+  <div class="m">Doctor: HEALTHY (2026-11-03)</div>
+  <hr><h4>ACTIONS</h4>
+  <div class="btns"><span class="b">Snapshot now</span><span class="b">Mark latest as baseline</span><span class="b">Push latest</span><span class="b">Run doctor</span></div>
+  <hr><h4>OPTIONS</h4>
+  <div class="row">Automatic backups &amp; doctor<span class="sw"></span></div>
+  <div class="lbl">Snapshot every</div>
+  <div class="btns"><span class="b on">daily</span><span class="b">weekly</span><span class="b">monthly</span></div>
+  <div class="lbl">Doctor check every</div>
+  <div class="btns"><span class="b">daily</span><span class="b">weekly</span><span class="b on">monthly</span></div>
+  <div class="row">Skip snapshot if nothing changed<span class="sw"></span></div>
+  <div class="lbl">Backup destination</div>
+  <div class="b" style="color:var(--muted)">~/Backups/omarchy</div>
+</body></html>

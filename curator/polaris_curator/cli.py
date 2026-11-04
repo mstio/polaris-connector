@@ -10,6 +10,7 @@ from pathlib import Path
 from . import config as config_mod
 from . import documents_source, pipeline, state as state_mod, storage
 from .config import CuratorConfig
+from .i18n import language, t
 
 
 def _resolve_project(name_or_path: str) -> Path:
@@ -130,6 +131,8 @@ def cmd_status_all(args: argparse.Namespace) -> int:
     result = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        # Fuer das Widget, das seine festen Texte selbst uebersetzt (i18n.py).
+        "language": language(),
         "projects": payloads,
         "summary": summary,
         "health": health,
@@ -141,20 +144,18 @@ def cmd_status_all(args: argparse.Namespace) -> int:
     print("Polaris Curator")
     print()
     for item in payloads:
-        print(
-            f"{item['name']}: {item['new_messages']} Messages, "
-            f"{item['new_documents'] + item['new_emails'] + item['new_notes']} Dokumente, "
-            f"{item['planned_llm_calls']} geplante LLM-Calls"
-        )
+        print(t("{name}: {messages} Messages, {documents} Dokumente, {calls} geplante LLM-Calls",
+                name=item["name"], messages=item["new_messages"],
+                documents=item["new_documents"] + item["new_emails"] + item["new_notes"],
+                calls=item["planned_llm_calls"]))
     print()
-    print(
-        f"{summary['pending_projects']} von {summary['project_count']} Projekten offen, "
-        f"{summary['planned_llm_calls']} geplante LLM-Calls"
-    )
+    print(t("{pending} von {total} Projekten offen, {calls} geplante LLM-Calls",
+            pending=summary["pending_projects"], total=summary["project_count"],
+            calls=summary["planned_llm_calls"]))
     if "chatgpt" in sources:
-        print(f"Letzte ChatGPT-Nachricht: {health['last_chatgpt_message_at'] or 'keine'}")
+        print(t("Letzte ChatGPT-Nachricht: {at}", at=health["last_chatgpt_message_at"] or t("keine")))
     for warning in health["warnings"]:
-        print(f"WARNUNG: {warning}")
+        print(t("WARNUNG: {warning}", warning=warning))
     return 0
 
 
@@ -374,14 +375,14 @@ def cmd_run_all(args: argparse.Namespace) -> int:
         reason = r["report"].get("aborted_reason") or ""
         if reason == "journal" or reason.startswith("error:"):
             first = (r["report"].get("errors") or [""])[0]
-            health["warnings"].append(f"{Path(r['path']).name}: nicht kuratiert - {first[:200]}")
+            health["warnings"].append(t("{name}: nicht kuratiert - {error}", name=Path(r["path"]).name,
+                                        error=first[:200]))
     blocked = [r["path"] for r in reports if r["report"].get("aborted_reason") == "integrity"]
     if blocked:
         health["warnings"].insert(
             0,
-            "Projekttrennung verletzt, nicht kuratiert: "
-            + ", ".join(Path(p).name for p in blocked)
-            + " (polaris-curator health, Quarantäne/retract)",
+            t("Projekttrennung verletzt, nicht kuratiert: {names} (polaris-curator health, Quarantäne/retract)",
+              names=", ".join(Path(p).name for p in blocked)),
         )
     if health["warnings"]:
         for warning in health["warnings"]:
@@ -582,7 +583,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(data, ensure_ascii=False))
         return 0
-    marks = {"ok": "OK  ", "warn": "WARN", "error": "FEHL"}
+    marks = {"ok": "OK  ", "warn": "WARN", "error": t("FEHL")}
     if getattr(args, "all", False):
         for c in (data.get("checks") or data["components"]) + data["system"]:
             print(f"{marks[c['level']]}  {c['label']}: {c['detail']}")

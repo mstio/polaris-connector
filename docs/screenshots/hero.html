@@ -1,0 +1,59 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  :root{--bg:#1b130b;--panel:#241a10;--panel2:#2c2014;--line:#3d2e1d;--text:#e6d8bd;--muted:#9c8b70;--gold:#d8b46c;
+        --fact:#9cc27c;--claim:#86b2d6;--hyp:#e0a35e;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:1600px;height:830px;background:radial-gradient(1200px 600px at 75% 30%,#2a1d10 0%,var(--bg) 60%);
+       color:var(--text);font-family:Inter,sans-serif;padding:56px 64px;overflow:hidden}
+  .top{display:flex;align-items:center;gap:14px;color:var(--gold);font:600 22px "JetBrainsMono Nerd Font",monospace;letter-spacing:.5px}
+  .star{font-size:26px}
+  h1{font:800 50px/1.12 Inter,sans-serif;margin:18px 0 10px;letter-spacing:-.5px}
+  h1 em{font-style:normal;color:var(--gold)}
+  .sub{color:var(--muted);font-size:21px;margin-bottom:38px}
+  .row{display:flex;gap:34px;align-items:stretch}
+  .sources{width:390px;display:flex;flex-direction:column;gap:12px;justify-content:center}
+  .src{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 18px}
+  .src b{display:block;font:700 15px Inter;color:var(--gold);margin-bottom:6px;letter-spacing:.3px}
+  .src p{font:15px/1.45 "JetBrainsMono Nerd Font",monospace;color:var(--text);opacity:.9}
+  .arrow{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;color:var(--gold);width:120px}
+  .arrow .a{font-size:44px;line-height:1}
+  .arrow span{font:600 13px "JetBrainsMono Nerd Font",monospace;color:var(--muted);text-align:center}
+  .doc{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 26px;
+       box-shadow:0 20px 60px rgba(0,0,0,.45)}
+  .tabs{display:flex;gap:10px;margin-bottom:16px;font:600 14px "JetBrainsMono Nerd Font",monospace}
+  .tab{padding:6px 12px;border-radius:8px;color:var(--muted);border:1px solid var(--line)}
+  .tab.on{color:var(--bg);background:var(--gold);border-color:var(--gold)}
+  h3{font:700 15px Inter;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin:14px 0 8px}
+  .e{background:var(--panel2);border-radius:12px;padding:12px 16px;margin-bottom:10px;border-left:4px solid var(--fact)}
+  .e.claim{border-left-color:var(--claim)} .e.hyp{border-left-color:var(--hyp)}
+  .e .t{font-size:17.5px;line-height:1.4}
+  .pill{display:inline-block;font:700 12.5px Inter;padding:2px 9px;border-radius:99px;margin-right:8px;vertical-align:2px;color:#1b130b;background:var(--fact)}
+  .claim .pill{background:var(--claim)} .hyp .pill{background:var(--hyp)}
+  .meta{margin-top:7px;font:13.5px "JetBrainsMono Nerd Font",monospace;color:var(--muted)}
+  .meta .src2{color:var(--gold)}
+</style></head><body>
+  <div class="top"><span class="star">✦</span> Polaris <span style="color:var(--muted);font-weight:400">· for Omarchy</span></div>
+  <h1>Chats, meetings, mails and documents in.<br><em>A project memory you own</em> out.</h1>
+  <div class="sub">Curated per project by the agent you already use. Every entry sourced. Plain Markdown in your folders.</div>
+  <div class="row">
+    <div class="sources">
+      <div class="src"><b>ChatGPT · project chat</b><p>“Please compare the three data centre offers …”</p></div>
+      <div class="src"><b>Claude · project chat</b><p>“How many VMs actually have to move?”</p></div>
+      <div class="src"><b>Meeting · transcript</b><p>steering-committee-2026-10-30.txt<br>“February is tight, but doable …”</p></div>
+      <div class="src"><b>Inbox · mail, Excel, PDF</b><p>2026-10-28-head-of-it.eml<br>offer-comparison.xlsx</p></div>
+    </div>
+    <div class="arrow"><div class="a">→</div><span>polaris-<br>curator</span></div>
+    <div class="doc">
+      <div class="tabs"><span class="tab on">knowledge.md</span><span class="tab">decisions.md · 2</span><span class="tab">open-loops.md · 2 open</span></div>
+      <h3>Current status</h3>
+      <div class="e"><div class="t"><span class="pill">Fact</span>Offers from three data centres are in; the cheapest is 18 % under budget but requires a 36-month term.</div>
+        <div class="meta">Confidence high · multiple sources · K4 · <span class="src2">↳ offer-comparison.xlsx</span></div></div>
+      <div class="e claim"><div class="t"><span class="pill">Stakeholder statement</span>The head of IT considers a February move realistic only with external support.</div>
+        <div class="meta">Confidence medium · single source · K6 · <span class="src2">↳ mail of 28 Oct</span></div></div>
+      <h3>Relevant insights</h3>
+      <div class="e hyp"><div class="t"><span class="pill">Hypothesis</span>Moving in two waves clearly lowers the outage risk but extends the project by about four weeks.</div>
+        <div class="meta">To check: not yet agreed with the provider · K7 · <span class="src2">↳ ChatGPT, 2 Nov</span></div></div>
+    </div>
+  </div>
+</body></html>

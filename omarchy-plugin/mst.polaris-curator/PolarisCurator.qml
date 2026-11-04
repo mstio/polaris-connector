@@ -27,9 +27,84 @@ Panel {
   property var timerState: ({})
   property var health: ({})
   property var systemHealth: ({})
+  // Sprache aus curator.yaml (language: de|en), geliefert von status-json.
+  property string lang: "de"
 
   implicitWidth: icon.implicitWidth
   implicitHeight: root.bar ? root.bar.barSize : Style.bar.sizeHorizontal
+
+  // Feste Texte: deutscher Text ist der Schluessel, Englisch bei language: en.
+  readonly property var en: ({
+    "Chat-Nachricht": "chat message",
+    "Chat-Nachrichten": "chat messages",
+    "Dokument": "document",
+    "Dokumente": "documents",
+    "E-Mail": "mail",
+    "E-Mails": "mails",
+    "Notiz": "note",
+    "Notizen": "notes",
+    "Aktuell": "Up to date",
+    " geplanter LLM-Aufruf": " planned LLM call",
+    " geplante LLM-Aufrufe": " planned LLM calls",
+    " danach weiter offen": " still open afterwards",
+    " · zuletzt ": " · last ",
+    "Curator-Status konnte nicht gelesen werden.": "Curator status could not be read.",
+    "Wissen": "knowledge",
+    "Entscheidungen": "decisions",
+    "offene Punkte": "open loops",
+    " Einheit": " unit",
+    " Einheiten": " units",
+    " verarbeitet": " processed",
+    " · geändert: ": " · changed: ",
+    " · keine Wissensänderung": " · no knowledge change",
+    " Projekte geprüft · ": " projects checked · ",
+    " Einheiten verarbeitet · ": " units processed · ",
+    " Projekte geändert": " projects changed",
+    "Aktion abgeschlossen.": "Action finished.",
+    "Curator-Statusprozess ist fehlgeschlagen.": "Curator status process failed.",
+    "Curator-Lauf ist ohne lesbares Ergebnis beendet worden.": "Curator run ended without a readable result.",
+    "Datei oder Projektordner konnte nicht geöffnet werden.": "File or project folder could not be opened.",
+    "Polaris Curator ist nicht installiert": "Polaris Curator is not installed",
+    "Polaris Curator läuft: ": "Polaris Curator running: ",
+    "Alles in Ordnung · ": "All good · ",
+    " Projekte mit offenen Quellen": " projects with open sources",
+    "Health Check · alles in Ordnung": "Health Check · all good",
+    "Status aktualisieren": "Refresh status",
+    "Schließen": "Close",
+    "Archivierung prüfen": "Check archiving",
+    "Status nicht verfügbar": "Status not available",
+    " von ": " of ",
+    " Projekten offen": " projects open",
+    "Alle Projekte sind aktuell": "All projects are up to date",
+    "neue Chat-Nachricht": "new chat message",
+    "neue Chat-Nachrichten": "new chat messages",
+    "neue Inbox-Datei": "new inbox file",
+    "neue Inbox-Dateien": "new inbox files",
+    "LLM-Aufruf": "LLM call",
+    "LLM-Aufrufe": "LLM calls",
+    "Neue ChatGPT-Nachrichten und Dateien aus inbox/{documents,mail,notes} erscheinen hier automatisch.": "New chat messages and files from inbox/{documents,mail,notes} show up here automatically.",
+    "Automatik aktiv": "Automatic on",
+    " · nächster Lauf ": " · next run ",
+    "Automatischer Timer ist nicht aktiv": "Automatic timer is not active",
+    "Alle Projekte werden kuratiert…": "Curating all projects…",
+    "Alle offenen Projekte kuratieren": "Curate all open projects",
+    " offen": " open",
+    "aktuell": "up to date",
+    "Läuft…": "Running…",
+    "Kuratieren": "Curate",
+    "Ordner": "Folder",
+    "Offene Punkte": "Open loops",
+    "Keine gemappten Polaris-Projekte gefunden.": "No mapped Polaris projects found.",
+    "Alle Projekte": "All projects",
+    "manueller Lauf": "manual run",
+    "Health-Check": "Health check",
+    "konnte nicht ermittelt werden – polaris-curator health im Terminal ausführen": "could not be determined – run polaris-curator health in a terminal",
+    "Status pausiert, solange der Bildschirm gesperrt ist": "Status paused while the screen is locked"
+  })
+
+  function t(de) {
+    return root.lang === "en" && root.en[de] !== undefined ? root.en[de] : de
+  }
 
   function pendingUnits() {
     return Number(root.summary.pending_units || 0)
@@ -113,23 +188,23 @@ Panel {
   function projectSources(project) {
     var parts = []
     if (Number(project.new_messages || 0) > 0)
-      parts.push(formatCount(project.new_messages, "Chat-Nachricht", "Chat-Nachrichten"))
+      parts.push(formatCount(project.new_messages, root.t("Chat-Nachricht"), root.t("Chat-Nachrichten")))
     if (Number(project.new_documents || 0) > 0)
-      parts.push(formatCount(project.new_documents, "Dokument", "Dokumente"))
+      parts.push(formatCount(project.new_documents, root.t("Dokument"), root.t("Dokumente")))
     if (Number(project.new_emails || 0) > 0)
-      parts.push(formatCount(project.new_emails, "E-Mail", "E-Mails"))
+      parts.push(formatCount(project.new_emails, root.t("E-Mail"), root.t("E-Mails")))
     if (Number(project.new_notes || 0) > 0)
-      parts.push(formatCount(project.new_notes, "Notiz", "Notizen"))
-    return parts.length > 0 ? parts.join(" · ") : "Aktuell"
+      parts.push(formatCount(project.new_notes, root.t("Notiz"), root.t("Notizen")))
+    return parts.length > 0 ? parts.join(" · ") : root.t("Aktuell")
   }
 
   function projectPlan(project) {
     var calls = Number(project.planned_llm_calls || 0)
-    var text = calls + (calls === 1 ? " geplanter LLM-Aufruf" : " geplante LLM-Aufrufe")
+    var text = calls + (calls === 1 ? root.t(" geplanter LLM-Aufruf") : root.t(" geplante LLM-Aufrufe"))
     if (Number(project.backlog_units || 0) > 0)
-      text += " · " + project.backlog_units + " danach weiter offen"
+      text += " · " + project.backlog_units + root.t(" danach weiter offen")
     if (project.last_successful_run)
-      text += " · zuletzt " + Qt.formatDateTime(new Date(project.last_successful_run), "dd.MM. HH:mm")
+      text += root.t(" · zuletzt ") + Qt.formatDateTime(new Date(project.last_successful_run), "dd.MM. HH:mm")
     return text
   }
 
@@ -144,11 +219,12 @@ Panel {
       root.timerState = data.timer || {}
       root.health = data.health || {}
       root.systemHealth = data.system_health || {}
-      if (data.error) root.lastResult = String(data.error)
+      root.lang = data.language === "en" ? "en" : "de"
+      if (data.error) root.lastResult = root.t(String(data.error))
     } catch (e) {
       root.statusError = true
       root.lastResultOk = false
-      root.lastResult = "Curator-Status konnte nicht gelesen werden."
+      root.lastResult = root.t("Curator-Status konnte nicht gelesen werden.")
     }
   }
 
@@ -188,12 +264,12 @@ Panel {
       var processed = Number((report.day_batches_processed || []).length)
         + Number((report.documents_processed || []).length)
       var changed = []
-      if (report.knowledge_changed) changed.push("Wissen")
-      if (report.decisions_changed) changed.push("Entscheidungen")
-      if (report.open_loops_changed) changed.push("offene Punkte")
+      if (report.knowledge_changed) changed.push(root.t("Wissen"))
+      if (report.decisions_changed) changed.push(root.t("Entscheidungen"))
+      if (report.open_loops_changed) changed.push(root.t("offene Punkte"))
       if (report.aborted_reason) return report.project + ": " + report.aborted_reason
-      return report.project + ": " + processed + (processed === 1 ? " Einheit" : " Einheiten") + " verarbeitet"
-        + (changed.length > 0 ? " · geändert: " + changed.join(", ") : " · keine Wissensänderung")
+      return report.project + ": " + processed + (processed === 1 ? root.t(" Einheit") : root.t(" Einheiten")) + root.t(" verarbeitet")
+        + (changed.length > 0 ? root.t(" · geändert: ") + changed.join(", ") : root.t(" · keine Wissensänderung"))
     }
     if (data.reports) {
       var units = 0
@@ -203,10 +279,10 @@ Panel {
         units += Number((r.day_batches_processed || []).length) + Number((r.documents_processed || []).length)
         if (r.knowledge_changed || r.decisions_changed || r.open_loops_changed) changedProjects++
       }
-      return data.reports.length + " Projekte geprüft · " + units + " Einheiten verarbeitet · "
-        + changedProjects + " Projekte geändert"
+      return data.reports.length + root.t(" Projekte geprüft · ") + units + root.t(" Einheiten verarbeitet · ")
+        + changedProjects + root.t(" Projekte geändert")
     }
-    return data.error || "Aktion abgeschlossen."
+    return data.error || root.t("Aktion abgeschlossen.")
   }
 
   Process {
@@ -219,7 +295,7 @@ Panel {
       else {
         root.statusError = true
         root.lastResultOk = false
-        root.lastResult = "Curator-Statusprozess ist fehlgeschlagen."
+        root.lastResult = root.t("Curator-Statusprozess ist fehlgeschlagen.")
       }
     }
   }
@@ -235,7 +311,7 @@ Panel {
         root.lastResult = root.summarizeAction(data)
       } catch (e) {
         root.lastResultOk = false
-        root.lastResult = "Curator-Lauf ist ohne lesbares Ergebnis beendet worden."
+        root.lastResult = root.t("Curator-Lauf ist ohne lesbares Ergebnis beendet worden.")
       }
       root.actionTarget = ""
       root.refreshStatus()
@@ -272,7 +348,7 @@ Panel {
       }
       if (!ok) {
         root.lastResultOk = false
-        root.lastResult = error || "Datei oder Projektordner konnte nicht geöffnet werden."
+        root.lastResult = error || root.t("Datei oder Projektordner konnte nicht geöffnet werden.")
       }
     }
   }
@@ -299,13 +375,13 @@ Panel {
     bar: root.bar
     text: "\uf21e"
     fixedWidth: Style.bar.iconSlot
-    tooltipText: root.wrapTooltip(!root.installed ? "Polaris Curator ist nicht installiert"
+    tooltipText: root.wrapTooltip(!root.installed ? root.t("Polaris Curator ist nicht installiert")
       : root.firstProblem() ? root.firstProblem().label + ": " + root.firstProblem().detail
       : root.healthWarnings().length > 0 ? "Polaris: " + root.healthWarnings()[0]
-      : root.actionRunning ? "Polaris Curator läuft: " + root.actionTarget
+      : root.actionRunning ? root.t("Polaris Curator läuft: ") + root.t(root.actionTarget)
       : root.pendingUnits() > 0
-        ? "Alles in Ordnung · " + root.pendingProjects() + " Projekte mit offenen Quellen"
-        : "Health Check · alles in Ordnung", 60, 8)
+        ? root.t("Alles in Ordnung · ") + root.pendingProjects() + root.t(" Projekte mit offenen Quellen")
+        : root.t("Health Check · alles in Ordnung"), 60, 8)
 
     Rectangle {
       anchors.right: parent.right
@@ -370,10 +446,10 @@ Panel {
               text: ""
               iconText: "⟳"
               iconSpinning: root.refreshing
-              tooltipText: "Status aktualisieren"
+              tooltipText: root.t("Status aktualisieren")
               onClicked: root.refreshStatus()
             }
-            Button { text: "✕"; tooltipText: "Schließen"; onClicked: root.close() }
+            Button { text: "✕"; tooltipText: root.t("Schließen"); onClicked: root.close() }
           }
 
           PanelSeparator { foreground: Commons.Color.foreground }
@@ -398,7 +474,7 @@ Panel {
                   Layout.fillWidth: true
                   spacing: 0
                   Text {
-                    text: modelData.label
+                    text: root.t(modelData.label)
                     color: Commons.Color.foreground
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
@@ -407,7 +483,7 @@ Panel {
                   Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: modelData.detail
+                    text: root.t(modelData.detail)
                     color: modelData.level === "ok" ? Commons.Color.muted : root.levelColor(modelData.level)
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
@@ -443,7 +519,7 @@ Panel {
             spacing: Style.spacing.xs
             visible: root.healthWarnings().length > 0
             Text {
-              text: "Archivierung prüfen"
+              text: root.t("Archivierung prüfen")
               color: Commons.Color.urgent
               font.family: Style.font.family
               font.pixelSize: Style.font.body
@@ -467,10 +543,10 @@ Panel {
             Layout.fillWidth: true
             spacing: Style.spacing.xs
             Text {
-              text: root.statusError ? "Status nicht verfügbar"
+              text: root.statusError ? root.t("Status nicht verfügbar")
                 : root.pendingUnits() > 0
-                  ? root.pendingProjects() + " von " + Number(root.summary.project_count || 0) + " Projekten offen"
-                  : "Alle Projekte sind aktuell"
+                  ? root.pendingProjects() + root.t(" von ") + Number(root.summary.project_count || 0) + root.t(" Projekten offen")
+                  : root.t("Alle Projekte sind aktuell")
               color: root.statusError ? Commons.Color.urgent : root.pendingUnits() > 0 ? Commons.Color.accent : Commons.Color.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.body
@@ -480,10 +556,10 @@ Panel {
               Layout.fillWidth: true
               wrapMode: Text.Wrap
               text: root.pendingUnits() > 0
-                ? root.formatCount(root.summary.new_messages, "neue Chat-Nachricht", "neue Chat-Nachrichten")
-                  + " · " + root.formatCount(root.summary.new_documents, "neue Inbox-Datei", "neue Inbox-Dateien")
-                  + " · " + root.formatCount(root.summary.planned_llm_calls, "LLM-Aufruf", "LLM-Aufrufe")
-                : "Neue ChatGPT-Nachrichten und Dateien aus inbox/{documents,mail,notes} erscheinen hier automatisch."
+                ? root.formatCount(root.summary.new_messages, root.t("neue Chat-Nachricht"), root.t("neue Chat-Nachrichten"))
+                  + " · " + root.formatCount(root.summary.new_documents, root.t("neue Inbox-Datei"), root.t("neue Inbox-Dateien"))
+                  + " · " + root.formatCount(root.summary.planned_llm_calls, root.t("LLM-Aufruf"), root.t("LLM-Aufrufe"))
+                : root.t("Neue ChatGPT-Nachrichten und Dateien aus inbox/{documents,mail,notes} erscheinen hier automatisch.")
               color: Commons.Color.muted
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -492,8 +568,8 @@ Panel {
               Layout.fillWidth: true
               wrapMode: Text.Wrap
               text: root.timerState.enabled
-                ? "Automatik aktiv" + (root.timerState.next_run ? " · nächster Lauf " + root.timerState.next_run : "")
-                : "Automatischer Timer ist nicht aktiv"
+                ? root.t("Automatik aktiv") + (root.timerState.next_run ? root.t(" · nächster Lauf ") + root.timerState.next_run : "")
+                : root.t("Automatischer Timer ist nicht aktiv")
               color: Commons.Color.muted
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -503,7 +579,7 @@ Panel {
           Button {
             Layout.fillWidth: true
             text: root.actionRunning && root.actionTarget === "Alle Projekte"
-              ? "Alle Projekte werden kuratiert…" : "Alle offenen Projekte kuratieren"
+              ? root.t("Alle Projekte werden kuratiert…") : root.t("Alle offenen Projekte kuratieren")
             bordered: true
             iconSpinning: root.actionRunning && root.actionTarget === "Alle Projekte"
             opacity: !root.actionRunning && root.pendingUnits() > 0 ? 1.0 : 0.45
@@ -542,7 +618,7 @@ Panel {
                 }
                 Item { Layout.fillWidth: true }
                 Text {
-                  text: Number(modelData.pending_units || 0) > 0 ? modelData.pending_units + " offen" : "aktuell"
+                  text: Number(modelData.pending_units || 0) > 0 ? modelData.pending_units + root.t(" offen") : root.t("aktuell")
                   color: Number(modelData.pending_units || 0) > 0 ? Commons.Color.accent : Commons.Color.muted
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
@@ -570,16 +646,16 @@ Panel {
                 Layout.fillWidth: true
                 spacing: Style.spacing.controlGap
                 Button {
-                  text: root.actionRunning && root.actionTarget === modelData.name ? "Läuft…" : "Kuratieren"
+                  text: root.actionRunning && root.actionTarget === modelData.name ? root.t("Läuft…") : root.t("Kuratieren")
                   bordered: true
                   iconSpinning: root.actionRunning && root.actionTarget === modelData.name
                   opacity: !root.actionRunning && Number(modelData.pending_units || 0) > 0 ? 1.0 : 0.45
                   onClicked: if (!root.actionRunning && Number(modelData.pending_units || 0) > 0) root.runProject(modelData.name)
                 }
-                Button { text: "Wissen"; onClicked: root.openTarget(modelData.name, "knowledge") }
-                Button { text: "Entscheidungen"; onClicked: root.openTarget(modelData.name, "decisions") }
-                Button { text: "Offene Punkte"; onClicked: root.openTarget(modelData.name, "open-loops") }
-                Button { text: "Ordner"; onClicked: root.openTarget(modelData.name, "folder") }
+                Button { text: root.t("Wissen"); onClicked: root.openTarget(modelData.name, "knowledge") }
+                Button { text: root.t("Entscheidungen"); onClicked: root.openTarget(modelData.name, "decisions") }
+                Button { text: root.t("Offene Punkte"); onClicked: root.openTarget(modelData.name, "open-loops") }
+                Button { text: root.t("Ordner"); onClicked: root.openTarget(modelData.name, "folder") }
               }
 
               PanelSeparator { strength: 0.08 }
@@ -590,7 +666,7 @@ Panel {
             visible: root.projects.length === 0 && !root.refreshing
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            text: "Keine gemappten Polaris-Projekte gefunden."
+            text: root.t("Keine gemappten Polaris-Projekte gefunden.")
             color: Commons.Color.muted
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall

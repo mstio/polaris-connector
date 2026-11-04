@@ -1,6 +1,6 @@
 """Automatische Zuordnung ChatGPT-Projektname -> lokaler Projektordner.
 
-Reihenfolge (siehe README): exakter Name -> normalisierter Name -> Fuzzy
+Reihenfolge (siehe docs/core.md): exakter Name -> normalisierter Name -> Fuzzy
 Match bei sehr hoher Sicherheit -> sonst kein Match (Pending).
 
 Keine semantische/LLM-basierte Zuordnung.

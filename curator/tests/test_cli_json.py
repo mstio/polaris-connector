@@ -43,6 +43,7 @@ class CliJsonTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         data = json.loads(stdout.getvalue())
         self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["language"], "de")  # fuer das Widget (i18n.py)
         self.assertEqual(data["summary"]["pending_projects"], 1)
         self.assertEqual(data["summary"]["pending_units"], 5)
         self.assertEqual(data["summary"]["backlog_units"], 2)

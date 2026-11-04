@@ -8,6 +8,12 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- Widget und Health Check sprechen Englisch oder Deutsch: `language: en|de` in
+  `~/.config/polaris/curator.yaml`. Ohne die Zeile bleibt alles deutsch,
+  bestehende Installationen ändern sich also nicht. Neue Installationen
+  bekommen `language` aus `install.sh --language` bzw. der Systemsprache
+  (`LANG=de_*` → `de`, sonst `en`). Die Feldbezeichnungen in `knowledge.md`
+  bleiben vorerst deutsch.
 - Polaris wird nur noch per git verteilt; das Installationspaket (`make-bundle.sh`,
   `dist/polaris-setup-*`) entfällt. `install.sh` holt die Begleit-Repos selbst:
   Backup-Widget, Agenten-Starter und Dock per `omarchy plugin add` (danach

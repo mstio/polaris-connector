@@ -86,6 +86,12 @@ Standardwerten angelegt). Projektspezifischer Override (optional):
 `<Project>/.polaris/curator-config.yaml` (gleiches Format, nur die
 gesetzten Felder ueberschreiben den globalen Wert).
 
+Sprache (seit 2026-11-04): `language: de` oder `language: en` in der globalen
+`curator.yaml` stellt Widget und Health Check um. Fehlt die Zeile, gilt `de`
+(bestehende Installationen bleiben deutsch); neue Installationen setzt
+`install.sh --language` bzw. die Systemsprache. Die Feldbezeichnungen in
+`knowledge.md` usw. bleiben vorerst deutsch.
+
 ```yaml
 provider: openai
 runtime: codex

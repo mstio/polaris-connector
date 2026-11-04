@@ -23,3 +23,7 @@ budget:
   max_total_input_chars_per_run: 250000
 context:
   max_curated_context_chars: 200000
+
+# Sprache von Widget und Health Check: en oder de (fehlt die Zeile: de).
+# install.sh setzt sie nach --language bzw. der Systemsprache.
+language: en
