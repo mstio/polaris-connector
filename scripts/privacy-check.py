@@ -57,7 +57,14 @@ MAX_FILE = 200 * 1024 * 1024     # ... aber bis hierhin byte-gleich sperren
 MIN_FILE = 16                    # winzige Dateien ("{}") nicht als ganze Datei sperren
 # Polaris-eigene Formatzeilen stehen in jedem Projekt gleich und sind kein
 # Inhalt; sie bekommen keinen Fingerabdruck.
-FORMAT_LINE = re.compile(r"^-?\s*Scope: .+? · Evidenzgrad: .+? · Konfidenz: \S+$|^<!--\s*polaris-[\w-]+:.*-->$")
+FORMAT_LINE = re.compile(
+    r"^-?\s*Scope: .+? · Evidenzgrad: .+? · Konfidenz: \S+$"           # Curator-Metazeile
+    r"|^<!--\s*polaris-[\w-]+:.*-->$"                                  # polaris-Kommentare
+    r"|^-?\s*ID: [KDL]\d+ · (Gültig seit: \d{4}-\d\d-\d\d|offen seit \d{4}-\d\d-\d\d.*)$"  # ID-Zeile
+    r"|^\*\*[^*]{1,40}\*\*$"                                           # Feldname in decisions.md
+    r"|^[KDL]\d+$|^\d{4}-\d\d-\d\d$"                                    # ID bzw. Datum allein
+    r"|^(Aktiv|Abgelöst|Ersetzt|lokal|vorläufig|Pilot/Test|dauerhaft|unternehmensweiter Standard"
+    r"|Ja|Nein \(noch nicht (überprüft|bestätigt)\))$")                  # feste Feldwerte
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*$")
 POLARIS_HEADINGS = {h.casefold() for h in (
     # Abschnitte des Curators (prompts.py "Sektionsnamen", open-loops, decisions)

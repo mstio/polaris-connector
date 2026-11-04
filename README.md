@@ -9,7 +9,8 @@
   <a href="#what-you-get"><b>What you get</b></a> •
   <a href="#architecture-core-and-modules"><b>Architecture</b></a> •
   <a href="#module-browser-capture-chatgpt-and-claude"><b>Browser capture</b></a> •
-  <a href="#cross-cutting-modules"><b>Health, radar, memory</b></a>
+  <a href="#cross-cutting-modules"><b>Health, radar, memory</b></a> •
+  <a href="#privacy-and-legal-notice"><b>Privacy</b></a>
 </p>
 
 </div>
@@ -70,6 +71,32 @@ everything current. Details: [Quick start](#quick-start-on-a-new-omarchy-machine
 Current extension version: see `extension/manifest.json`. What changed between
 versions: [`CHANGELOG.md`](CHANGELOG.md) (German). Most detailed documents in
 this repository are written in German.
+
+## Privacy and legal notice
+
+Polaris is a tool, not a compliance solution. You are responsible for using
+it in line with the law that applies to you (in the EU: the GDPR) and with
+your providers' terms. Please check before you use it, especially at work.
+
+- **What it stores:** copies of your project chats, documents and mails, and
+  curated summaries that can attribute statements to named people. All of
+  it stays in your own folders; delete a project folder and it is gone.
+- **What leaves your machine:** whatever the curator hands to the agent CLI
+  you configure. That provider's terms and data processing apply (for
+  example OpenAI for Codex, Anthropic for Claude Code). To keep everything
+  local, use a local model via `runtime: command`.
+- **Other people's data:** chats and mails often contain names, contact
+  details and opinions of third parties. Purely personal use may fall under
+  the household exemption; professional use usually does not. Then you
+  typically need a legal basis, a data processing agreement with the model
+  provider, information for the people concerned and deletion rules. Ask
+  your data protection officer or legal adviser.
+- **Provider terms:** the extension reads your own chats through the web
+  apps' internal interfaces. Check that this is compatible with the terms of
+  the services you use.
+
+This notice is not legal advice. Polaris comes without warranty (MIT
+licence).
 
 ## Architecture: core and modules
 

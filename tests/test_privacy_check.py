@@ -123,6 +123,14 @@ class PrivacyCheckTest(unittest.TestCase):
         r = self.run_check(f"{meta}\n<!-- polaris-source: type=chatgpt conversation_id=c1 -->\n")
         self.assertEqual(r.returncode, 0, r.stdout)
 
+    def test_decision_and_id_format_lines_are_not_fingerprinted(self):
+        fmt = ("  - ID: L3 · offen seit 2026-11-02\n  - ID: K12 · Gültig seit: 2026-09-29\n"
+               "**Status**\nAktiv\n**Wirksamkeit geprüft**\nNein (noch nicht überprüft)\nD3\n2026-10-14\n")
+        (self.geheim / "decisions.md").write_text(fmt)
+        self.protect_by_marker()
+        r = self.run_check(fmt)
+        self.assertEqual(r.returncode, 0, r.stdout)
+
     def test_marker_file_in_tree_is_a_hit(self):
         r = self.run_check("", name=".polaris-protected")
         self.assertEqual(r.returncode, 1)
