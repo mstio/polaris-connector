@@ -136,19 +136,28 @@ Polaris-Wurzeln und Begriffe aus `~/.config/polaris/bundle-deny.txt`. Bei einem
 Treffer wird nichts gebaut. Allgemeine Ordnernamen stehen in
 `~/.config/polaris/bundle-allow.txt`; beide Listen bleiben lokal.
 
-Geschuetzte Ordner: Ein Projektordner mit der leeren Datei `.polaris-protected`
-oder ein Ordner in `~/.config/polaris/protected.txt` (eine Zeile je Ordner, `~`
-erlaubt) wird nicht ueber seinen Namen gesperrt, sondern ueber seinen Pfad und
-seinen Inhalt: Jede Textzeile daraus ab 30 Zeichen (ohne Polaris-Formatzeilen)
-bekommt einen Fingerabdruck, und eine solche Zeile im Paket ist ein Treffer.
-Treffer nennen nur Datei und Zeile, nie den Text; `bundle-allow.txt` hebt den
-Schutz nicht auf. Gelesen wird nur bei der Pruefung, Fingerabdruecke werden
-nicht gespeichert. Grenzen: nur Textdateien (PDF/Office nicht), nur woertliche
-Zeilen (umformulierte Inhalte erkennt die Pruefung nicht).
+Geschuetzte Ordner: Aus einem geschuetzten Ordner darf nichts veroeffentlicht
+werden, auch nicht sein Name. Geschuetzt ist ein Projektordner mit der leeren
+Datei `.polaris-protected` oder ein Ordner in `~/.config/polaris/protected.txt`
+(eine Zeile je Ordner, `~` erlaubt). Gesperrt sind dann:
+
+- sein Name (exakte Schreibweise, ganzes Wort, auch in Dateipfaden) und sein Pfad
+- jede Datei daraus byte-gleich, auch PDF, Office und Bilder
+- jede Textzeile mit Inhalt (ab 4 Buchstaben/Ziffern) als ganze Zeile und jede
+  Folge von 5 Woertern daraus (ab 25 Zeichen) auch mitten in anderem Text
+
+Ausgenommen sind nur Zeilen, die Polaris in jedes Projekt schreibt
+(Standard-Ueberschriften, Curator-Metazeile, `polaris-`-Kommentare, JSON-Geruest
+mit Polaris-Schluesseln). Treffer nennen nur Datei und Zeile, nie den Text;
+`bundle-allow.txt` hebt den Schutz nicht auf. Gelesen wird nur bei der Pruefung,
+Fingerabdruecke werden nicht gespeichert. Grenze: Umformuliertes oder
+Uebersetztes erkennt keine mechanische Pruefung.
 
 Dieselbe Pruefung laeuft in `scripts/publish-public.sh` und als `pre-push`-Hook
 im Spiegel-Klon (`scripts/public-pre-push`, von `publish-public.sh` als Symlink
-eingerichtet), also auch bei einem direkten `git push` dorthin.
+eingerichtet), also auch bei einem direkten `git push` dorthin. Der Hook prueft
+zusaetzlich Autor, Committer und Nachricht jedes Commits; `publish-public.sh`
+committet deshalb mit der GitHub-noreply-Adresse statt der eigenen Mail.
 
 Der Empfaenger braucht weder git noch GitHub-Zugang:
 

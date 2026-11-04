@@ -14,12 +14,21 @@ ins Paket. Zeilen mit Urheberangabe (Copyright, "author") sind erlaubt.
 Geschuetzte Ordner (seit 2026-11-04): Ordner aus
 ~/.config/polaris/protected.txt (eine Zeile je Ordner, ~ erlaubt) und jeder
 Projektordner unter den Polaris-Wurzeln mit einer Markierungsdatei
-.polaris-protected. Fuer sie gilt statt des Ordnernamens als Wort:
-  - ihr Pfad (absolut und relativ zum Home, z. B. Projekte/<Name>) ist gesperrt
-  - jede markante Textzeile daraus (ab 30 Zeichen, Leerraum und
-    Gross-/Kleinschreibung egal, ohne Polaris-Formatzeilen) ist gesperrt; abgeglichen wird ueber
-    SHA-256-Fingerabdruecke, die nur im Speicher liegen
+.polaris-protected. Fuer sie gilt statt des Ordnernamens als Wort (Nutzervorgabe: aus einem
+geschuetzten Ordner darf keinerlei Inhalt veroeffentlicht werden):
+  - ihr Name (exakte Schreibweise, ganzes Wort; auch die Existenz eines
+    geschuetzten Ordners wird nicht veroeffentlicht) und ihr Pfad (absolut und
+    relativ zum Home) sind gesperrt; bundle-allow.txt hebt das nicht auf
+  - jede Datei daraus ist byte-gleich gesperrt (auch PDF, Office, Bilder)
+  - jede Textzeile mit Inhalt (ab 4 Buchstaben/Ziffern; Leerraum und
+    Gross-/Kleinschreibung egal) ist als ganze Zeile gesperrt, dazu jede
+    Folge von 5 Woertern daraus (ab 25 Zeichen) auch mitten in anderem Text
+  - ausgenommen sind nur Polaris-Formatzeilen, die in jedem Projekt gleich
+    stehen: Curator-Metazeile, polaris-Kommentare, Standard-Ueberschriften,
+    JSON-Geruest mit Polaris-Schluesseln und Werten ohne Freitext
   - eine Markierungsdatei im Paket ist ein Treffer
+Abgeglichen wird ueber SHA-256-Fingerabdruecke bzw. im Speicher; nichts davon
+wird gespeichert.
 Treffer auf geschuetzte Inhalte nennen nur Datei und Zeile, nie den Text.
 
 Aufruf:  privacy-check.py <Ordner>      Exit 0 = sauber, 1 = Treffer
@@ -37,11 +46,52 @@ from pathlib import Path
 CFG = Path.home() / ".config" / "polaris"
 ATTRIBUTION = re.compile(r'Copyright|"author"\s*:')
 MARKER = ".polaris-protected"
-MIN_LINE = 30                    # kuerzere Zeilen sind zu allgemein ("## Offene Punkte")
-MAX_FILE = 5 * 1024 * 1024       # groessere Dateien im geschuetzten Ordner nicht einlesen
-# Polaris-eigene Formatzeilen (Curator-Metazeile, polaris-Kommentare) stehen in
-# jedem Projekt gleich und sind kein Inhalt; sie bekommen keinen Fingerabdruck.
+REPO = Path(__file__).resolve().parents[1]
+MIN_ALNUM = 4                    # Zeilen mit weniger Buchstaben/Ziffern ("---", "{", "1.") sind kein Inhalt
+SHINGLE_WORDS, SHINGLE_MIN = 5, 25   # Wortfenster fuer eingebettete Bruchstuecke (4 Woerter trafen deutsche Floskeln)
+# Fenster nur aus diesen Woertern sind Polaris-Rohdaten-Geruest ("url": "https://chatgpt.com/...")
+SHINGLE_NOISE = {"url", "https", "http", "www", "com", "org", "de", "chatgpt", "claude", "ai", "c", "chat"}
+MAX_TEXT = 5 * 1024 * 1024       # groessere Dateien nicht zeilenweise einlesen ...
+MAX_FILE = 200 * 1024 * 1024     # ... aber bis hierhin byte-gleich sperren
+MIN_FILE = 16                    # winzige Dateien ("{}") nicht als ganze Datei sperren
+# Polaris-eigene Formatzeilen stehen in jedem Projekt gleich und sind kein
+# Inhalt; sie bekommen keinen Fingerabdruck.
 FORMAT_LINE = re.compile(r"^-?\s*Scope: .+? · Evidenzgrad: .+? · Konfidenz: \S+$|^<!--\s*polaris-[\w-]+:.*-->$")
+HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*$")
+POLARIS_HEADINGS = {h.casefold() for h in (
+    # Abschnitte des Curators (prompts.py "Sektionsnamen", open-loops, decisions)
+    "Zielbild", "Aktueller Status", "Architektur / Prozesse", "Stakeholder / Rollen", "Kennzahlen / Fakten",
+    "Rahmenbedingungen", "Relevante Erkenntnisse", "Status", "Offen", "Erledigt",
+    # Dateititel und feste Abschnitte, die Polaris selbst schreibt
+    "Projektwissen", "Polaris Projektwissen", "Entscheidungen", "Weitere Entscheidungen", "Offene Punkte",
+    "Dokumente und Mail-Anhänge", "Dokumente und Notizen", "E-Mails", "Wissensarchiv", "Inhalt",
+    "Dateien pro Projekt", "So liest man die Einträge", "Zurückgenommene Einträge")}
+JSON_LINE = re.compile(r'^"([A-Za-z_]+)":\s*(\{|\[|\{\}|\[\]|true|false|null|-?\d+(?:\.\d+)?|"[a-z_]{1,20}")\s*,?$')
+_JSON_KEYS: set[str] | None = None
+
+
+def polaris_json_keys() -> set[str]:
+    """JSON-Schluessel, die Polaris selbst schreibt (aus dem Quelltext von Bridge und Curator)."""
+    global _JSON_KEYS
+    if _JSON_KEYS is None:
+        _JSON_KEYS = set()
+        for src in [*(REPO / "bridge" / "polaris").glob("*.py"), *(REPO / "curator" / "polaris_curator").glob("*.py")]:
+            try:
+                _JSON_KEYS |= set(re.findall(r'"([a-z_]{2,40})"\s*:', src.read_text(encoding="utf-8")))
+            except OSError:
+                pass
+    return _JSON_KEYS
+
+
+def is_format_line(line: str) -> bool:
+    s = " ".join(line.split())
+    if FORMAT_LINE.match(s):
+        return True
+    m = HEADING.match(s)
+    if m and m[1].casefold() in POLARIS_HEADINGS:
+        return True
+    m = JSON_LINE.match(s)
+    return bool(m and m[1] in polaris_json_keys())
 
 
 def _lines(path: Path) -> list[str]:
@@ -80,28 +130,80 @@ def _norm(line: str) -> str:
     return " ".join(line.split()).casefold()
 
 
-def _digest(line: str) -> bytes | None:
+def _content(line: str) -> str | None:
+    """Normalisierte Zeile, wenn sie Inhalt ist, sonst None."""
     n = _norm(line)
-    if len(n) < MIN_LINE or FORMAT_LINE.match(" ".join(line.split())):
+    if sum(c.isalnum() for c in n) < MIN_ALNUM or is_format_line(line):
         return None
-    return hashlib.sha256(n.encode()).digest()
+    return n
 
 
-def fingerprints(dirs: list[Path]) -> set[bytes]:
-    fps: set[bytes] = set()
-    for d in dirs:
-        if not d.is_dir():
-            print(f"Hinweis: geschuetzter Ordner fehlt, nur sein Pfad wird gesperrt: {d}", file=sys.stderr)
-            continue
-        for f in d.rglob("*"):
-            try:
-                if not f.is_file() or f.name == MARKER or f.stat().st_size > MAX_FILE:
+def _shingles(n: str) -> set[str]:
+    w = re.findall(r"\w+", n)
+    out = set()
+    for i in range(len(w) - SHINGLE_WORDS + 1):
+        part = w[i:i + SHINGLE_WORDS]
+        s = " ".join(part)
+        if len(s) >= SHINGLE_MIN and not set(part) <= SHINGLE_NOISE:
+            out.add(s)
+    return out
+
+
+def _file_digest(path: Path) -> bytes:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.digest()
+
+
+class Protected:
+    """Fingerabdruecke der geschuetzten Ordner (nur im Speicher)."""
+
+    def __init__(self, dirs: list[Path]):
+        self.lines: set[bytes] = set()
+        self.files: set[bytes] = set()
+        self.shingles: set[bytes] = set()
+        for d in dirs:
+            if not d.is_dir():
+                print(f"Hinweis: geschuetzter Ordner fehlt, nur sein Pfad wird gesperrt: {d}", file=sys.stderr)
+                continue
+            for f in d.rglob("*"):
+                try:
+                    if not f.is_file() or f.name == MARKER:
+                        continue
+                    size = f.stat().st_size
+                    if not MIN_FILE <= size <= MAX_FILE:
+                        continue
+                    digest = _file_digest(f)
+                    text = f.read_text(encoding="utf-8") if size <= MAX_TEXT else None
+                except UnicodeDecodeError:
+                    self.files.add(digest)       # Binaerdatei: byte-gleich gesperrt
                     continue
-                text = f.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue  # Binaerdateien, keine Rechte
-            fps.update(h for h in map(_digest, text.splitlines()) if h)
-    return fps
+                except OSError:
+                    continue
+                if text is None:
+                    self.files.add(digest)
+                    continue
+                contents = [n for n in map(_content, text.splitlines()) if n]
+                if contents:                     # Datei nur aus Polaris-Geruest ist kein Inhalt
+                    self.files.add(digest)
+                for n in contents:
+                    self.lines.add(hashlib.sha256(n.encode()).digest())
+                    self.shingles |= {hashlib.sha256(s.encode()).digest() for s in _shingles(n)}
+
+    def hit(self, line: str) -> bool:
+        n = _norm(line)
+        if hashlib.sha256(n.encode()).digest() in self.lines and _content(line):
+            return True
+        return any(hashlib.sha256(s.encode()).digest() in self.shingles for s in _shingles(n))
+
+    def __len__(self) -> int:
+        return len(self.lines)
+
+
+def fingerprints(dirs: list[Path]) -> Protected:
+    return Protected(dirs)
 
 
 def terms(protected: list[Path] | None = None) -> list[str]:
@@ -128,26 +230,45 @@ def terms(protected: list[Path] | None = None) -> list[str]:
     return sorted(terms_, key=str.casefold)
 
 
-def scan(root: Path, words: list[str], fps: set[bytes] | None = None) -> list[str]:
-    fps = fps or set()
+def exact_names(protected: list[Path]) -> list[str]:
+    """Namen geschuetzter Ordner: exakte Schreibweise, ganzes Wort, nie freizugeben.
+    (Ein allgemeines kleingeschriebenes Wort gleichen Inhalts bleibt erlaubt.)"""
+    return sorted({p.name for p in protected if p.name})
+
+
+def scan(root: Path, words: list[str], fps: Protected | None = None,
+         names: list[str] | None = None) -> list[str]:
     pattern = re.compile("|".join(
         (re.escape(w) if not w[0].isalnum() else rf"(?<!\w){re.escape(w)}(?!\w)") for w in words), re.I) \
         if words else None
+    exact = re.compile("|".join(rf"(?<!\w){re.escape(n)}(?!\w)" for n in names)) if names else None
     hits = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(root)
+        if exact and exact.search(str(rel)):
+            hits.append(f"{rel}: Name eines geschuetzten Ordners im Dateipfad")
+            continue
         if path.name == MARKER:
             hits.append(f"{rel}: Markierungsdatei eines geschuetzten Ordners")
             continue
+        try:
+            if fps and fps.files and MIN_FILE <= path.stat().st_size <= MAX_FILE and _file_digest(path) in fps.files:
+                hits.append(f"{rel}: Datei aus geschuetztem Ordner (byte-gleich)")
+                continue
+        except OSError:
+            pass
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue  # Binaerdateien (.xpi, Bilder)
         for no, line in enumerate(text.splitlines(), 1):
-            if fps and _digest(line) in fps:
+            if fps and fps.hit(line):
                 hits.append(f"{rel}:{no}: Inhalt aus geschuetztem Ordner (Text nicht angezeigt)")
+                continue
+            if exact and exact.search(line):
+                hits.append(f"{rel}:{no}: Name eines geschuetzten Ordners (Text nicht angezeigt)")
                 continue
             if pattern is None or ATTRIBUTION.search(line):
                 continue
@@ -164,7 +285,7 @@ def main() -> int:
     protected = protected_dirs()
     words = terms(protected)
     fps = fingerprints(protected)
-    hits = scan(Path(sys.argv[1]), words, fps)
+    hits = scan(Path(sys.argv[1]), words, fps, exact_names(protected))
     for h in hits:
         print(h)
     print(f"Privatsphaere-Pruefung: {len(words)} Begriffe, {len(protected)} geschuetzte Ordner "

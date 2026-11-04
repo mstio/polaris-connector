@@ -27,6 +27,13 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
       echo "pre-push: private Inhalte in Commit ${sha:0:7} - Push abgebrochen." >&2
       fail=1
     fi
+    # Metadaten (Autor, Committer, Nachricht) sind ebenfalls oeffentlich.
+    rm -rf -- "$work/meta" && mkdir "$work/meta"
+    git log -1 --format='%an <%ae>%n%cn <%ce>%n%B' "$sha" > "$work/meta/commit.txt"
+    if ! python3 "$CHECK" "$work/meta"; then
+      echo "pre-push: private Angaben in Autor/Nachricht von Commit ${sha:0:7} - Push abgebrochen." >&2
+      fail=1
+    fi
   done
 done
 exit "$fail"

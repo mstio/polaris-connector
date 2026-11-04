@@ -63,6 +63,17 @@ class PrivacyCheckTest(unittest.TestCase):
         self.assertIn("README.md:2: Inhalt aus geschuetztem Ordner", r.stdout)
         self.assertNotIn("musterstadt", r.stdout.casefold())
 
+    def test_marker_keeps_exact_name_blocked(self):
+        self.protect_by_marker()
+        r = self.run_check("Im Ordner Vertraulich liegt nichts.\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("Vertraulich", r.stdout)                    # Treffer nennt den Namen nicht
+        (self.cfg / "bundle-allow.txt").write_text("Vertraulich\n")
+        self.assertEqual(self.run_check("Vertraulich\n").returncode, 1)
+        (self.tree / "README.md").unlink()
+        r = self.run_check("x\n", name="Vertraulich.md")
+        self.assertIn("im Dateipfad", r.stdout)
+
     def test_marker_blocks_path(self):
         self.protect_by_marker()
         r = self.run_check("Siehe Projekte/Vertraulich/notizen.md\n")
@@ -83,10 +94,27 @@ class PrivacyCheckTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("1 geschuetzte Ordner", r.stderr)
 
-    def test_short_lines_are_not_fingerprinted(self):
+    def test_short_content_lines_are_blocked(self):
+        (self.geheim / "kurz.md").write_text("Max Muster\nTel 0170 123\n---\n## Offen\n")
         self.protect_by_marker()
-        r = self.run_check("# Notizen\n")
+        self.assertEqual(self.run_check("# Notizen\n").returncode, 1)        # eigene Ueberschrift ist Inhalt
+        self.assertEqual(self.run_check("Max Muster\n").returncode, 1)
+        self.assertEqual(self.run_check("Tel 0170 123\n").returncode, 1)
+        r = self.run_check("---\n## Offen\n")                               # Gerüst und Polaris-Ueberschrift
         self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_embedded_content_is_blocked(self):
+        self.protect_by_marker()
+        r = self.run_check(f'x = "{SECRET[:40]}"  # Beispiel\n')
+        self.assertEqual(r.returncode, 1, r.stdout)
+
+    def test_binary_file_copy_is_blocked(self):
+        (self.geheim / "scan.pdf").write_bytes(b"%PDF-1.7\x00\xff\xfe" + bytes(range(256)))
+        self.protect_by_marker()
+        (self.tree / "beilage.bin").write_bytes((self.geheim / "scan.pdf").read_bytes())
+        r = subprocess.run(["python3", str(CHECK), str(self.tree)], env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("byte-gleich", r.stdout)
 
     def test_polaris_format_lines_are_not_fingerprinted(self):
         meta = "  - Scope: lokal · Evidenzgrad: Einzelbeleg · Konfidenz: hoch"
@@ -121,6 +149,24 @@ class PrivacyCheckTest(unittest.TestCase):
                            capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("Push abgebrochen", r.stderr)
+
+    def test_pre_push_hook_checks_commit_metadata(self):
+        (self.cfg / "bundle-deny.txt").write_text("Geheimfirma\n")
+        base = Path(self._tmp.name)
+        remote, clone = base / "remote.git", base / "clone"
+        git = lambda *a, cwd=None: subprocess.run(["git", *a], cwd=cwd, env=self.env, check=True,
+                                                   capture_output=True, text=True)
+        git("init", "-q", "--bare", str(remote))
+        git("init", "-q", "-b", "main", str(clone))
+        git("remote", "add", "origin", str(remote), cwd=clone)
+        (clone / ".git" / "hooks" / "pre-push").symlink_to(HOOK)
+        (clone / "ok.md").write_text("harmlos\n")
+        git("add", "-A", cwd=clone)
+        git("-c", "user.name=Test", "-c", "user.email=chef@geheimfirma.example", "commit", "-qm", "ok", cwd=clone)
+        r = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=clone, env=self.env,
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Autor/Nachricht", r.stderr)
 
 
 if __name__ == "__main__":

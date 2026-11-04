@@ -113,7 +113,12 @@ git add -A
 if git diff --cached --quiet; then
   echo "Spiegel ist bereits auf dem Stand von $REF."
 else
-  git commit -q -m "Polaris $VERSION (Stand $(date +%F))"
+  # Oeffentliche Commits ohne private Mail-Adresse (seit 2026-11-04): GitHub-noreply-Adresse.
+  PUBLIC_EMAIL="${PUBLIC_EMAIL:-$(gh api user -q '"\(.id)+\(.login)@users.noreply.github.com"')}"
+  PUBLIC_NAME="${PUBLIC_NAME:-$(gh api user -q .login)}"
+  GIT_AUTHOR_NAME="$PUBLIC_NAME" GIT_AUTHOR_EMAIL="$PUBLIC_EMAIL" \
+  GIT_COMMITTER_NAME="$PUBLIC_NAME" GIT_COMMITTER_EMAIL="$PUBLIC_EMAIL" \
+    git commit -q -m "Polaris $VERSION (Stand $(date +%F))"
   git show --stat --format='Neuer Spiegel-Commit %h: %s' HEAD | head -40 || true
 fi
 if [ "$PUSH" = 1 ]; then

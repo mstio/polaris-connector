@@ -14,7 +14,7 @@ LIVE = """# Titel
 
 ## Geteilt <!-- allgemein -->
 - Regel A
-- Privat X <!-- privat -->
+- Intern X <!-- privat -->
   - Folgezeile von X
 - Regel B
   - Unterpunkt von B
@@ -32,7 +32,7 @@ class TestRender(unittest.TestCase):
         text, skipped = at.render(LIVE)
         self.assertIn("## Geteilt\n- Regel A\n- Regel B\n  - Unterpunkt von B\n", text)
         self.assertIn("## Auch geteilt\n- Regel C\n", text)
-        for secret in ("Privat X", "Folgezeile", "geheim", "Ohne Kennzeichnung", "<!--  allgemein", "Hinweis"):
+        for secret in ("Intern X", "Folgezeile", "geheim", "Ohne Kennzeichnung", "<!--  allgemein", "Hinweis"):
             self.assertNotIn(secret, text)
         self.assertEqual(skipped, ["Ohne Kennzeichnung"])
         self.assertTrue(text.startswith(at.HEADER))

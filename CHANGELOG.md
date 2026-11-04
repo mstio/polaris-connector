@@ -8,12 +8,20 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- Neu: Versionsabgleich im Radar-Sicherheitsabschnitt. Aktiv ausgenutzte Lücken
+  (CISA KEV) auf ein installiertes Paket werden mit den Versionsbereichen der NVD
+  verglichen; ist die installierte Version nicht betroffen, bleibt der Health
+  Check grün. Höchstens 5 NVD-Abfragen je Lauf, Zwischenspeicher
+  `~/.local/state/polaris/nvd.json`. Nacharbeit: keine.
+
 - Neu: geschützte Ordner für die Privatsphäre-Prüfung (Paket und öffentlicher
   Spiegel). Eine leere Datei `.polaris-protected` im Projektordner oder eine
-  Zeile in `~/.config/polaris/protected.txt` sperrt Pfad und Inhalt des Ordners
-  (Zeilen-Fingerabdrücke) statt nur seines Namens; ein allgemeines Wort wie der
-  Ordnername blockiert dann nicht mehr. Dazu ein `pre-push`-Hook im Spiegel-Klon,
-  den `publish-public.sh` einrichtet. Nacharbeit: keine.
+  Zeile in `~/.config/polaris/protected.txt` sperrt alles aus dem Ordner:
+  Namen (exakte Schreibweise), Pfad, Dateien byte-gleich, jede Inhaltszeile und
+  5-Wort-Bruchstücke. Das allgemeine kleingeschriebene Wort bleibt erlaubt.
+  Dazu ein `pre-push`-Hook im Spiegel-Klon, den `publish-public.sh` einrichtet;
+  er prüft auch Autor und Nachricht der Commits, Spiegel-Commits tragen die
+  GitHub-noreply-Adresse. Nacharbeit: keine.
 
 - Neu: Sicherheitsabgleich im Omarchy-Radar. `polaris-radar` gleicht installierte
   Pakete mit dem Arch Security Tracker, den laufenden Kernel mit kernel.org-Stable
