@@ -1,0 +1,12 @@
+#!/bin/bash
+# Polaris: nach `omarchy update` das Omarchy-Radar samt Sicherheitsabgleich im
+# Hintergrund erneuern (handoff/omarchy-radar.md). Blockiert das Update nicht;
+# laeuft hoechstens einmal gleichzeitig. Installiert von Polaris install.sh.
+radar="$HOME/.local/bin/polaris-radar"
+[ -x "$radar" ] || exit 0
+if systemctl --user cat polaris-radar.service >/dev/null 2>&1; then
+  systemctl --user start --no-block polaris-radar.service >/dev/null 2>&1 || true
+else
+  systemd-run --user --no-block --collect --quiet --unit=polaris-radar-update \
+    "$radar" --notify --quiet >/dev/null 2>&1 || true
+fi

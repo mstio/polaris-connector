@@ -401,7 +401,8 @@ command -v rsync >/dev/null || warn "rsync fehlt - Spiegel des Maschinengedaecht
 step "Befehle in $BIN_DIR"
 [ -d "$BIN_DIR" ] || run mkdir -p "$BIN_DIR"
 for pair in "polaris:bridge/bin/polaris" "polaris-curator:curator/bin/polaris-curator" \
-            "polaris-memory-mirror:memory/tools/memory-mirror" "polaris-awake:bridge/bin/polaris-awake"; do
+            "polaris-memory-mirror:memory/tools/memory-mirror" "polaris-awake:bridge/bin/polaris-awake" \
+            "polaris-radar:memory/tools/polaris-radar"; do
   name="${pair%%:*}" target="$REPO/${pair#*:}" link="$BIN_DIR/${pair%%:*}"
   if [ "$(readlink -f "$link" 2>/dev/null)" = "$target" ]; then
     say "  $name: ok"
@@ -487,7 +488,7 @@ if [ "$UNITS" = 1 ]; then
   step "systemd-Units ($UNIT_DIR)"
   run mkdir -p "$UNIT_DIR"
   changed=0
-  unit_sources=("$REPO"/curator/systemd/polaris-curator.{service,timer} "$REPO"/systemd/polaris-memory-mirror.{service,timer})
+  unit_sources=("$REPO"/curator/systemd/polaris-curator.{service,timer} "$REPO"/systemd/polaris-memory-mirror.{service,timer} "$REPO"/systemd/polaris-radar.{service,timer})
   [ "$CAPTURE_ENABLED" = 0 ] || unit_sources+=("$REPO"/systemd/polaris-bridge.{path,service,timer})
   for src in "${unit_sources[@]}"; do
     dst="$UNIT_DIR/$(basename "$src")"
@@ -528,7 +529,7 @@ if [ "$UNITS" = 1 ]; then
       fi
     done
   fi
-  timers=(polaris-curator.timer polaris-memory-mirror.timer)
+  timers=(polaris-curator.timer polaris-memory-mirror.timer polaris-radar.timer)
   [ "$CAPTURE_ENABLED" = 0 ] || timers+=(polaris-bridge.path polaris-bridge.timer)
   for u in "${timers[@]}"; do
     if [ "$(systemctl --user is-enabled "$u" 2>/dev/null)" = enabled ] && systemctl --user is-active -q "$u"; then
@@ -576,6 +577,22 @@ if [ "$DOCK" = 1 ] && command -v omarchy >/dev/null; then
     SHELL_RESTART=1
   else
     warn "Dock nicht installiert (Netz?): omarchy plugin add $DOCK_URL --enable"
+  fi
+fi
+
+# Omarchy-Radar nach jedem 'omarchy update' (Hook, kein Timer): neue Omarchy-
+# Funktionen, Plugin-Updates und vorgemerkte Punkte fuer die Agenten.
+HOOK_DIR="$HOME/.config/omarchy/hooks/post-update.d"
+if [ "$MEMORY" = 1 ] && command -v omarchy >/dev/null; then
+  step "Omarchy-Radar (Hook nach omarchy update)"
+  hook_src="$REPO/memory/tools/polaris-radar.hook" hook_dst="$HOOK_DIR/polaris-radar.hook"
+  if cmp -s "$hook_src" "$hook_dst" 2>/dev/null; then
+    say "  ok"
+  else
+    [ -d "$HOOK_DIR" ] || run mkdir -p "$HOOK_DIR"
+    [ -e "$hook_dst" ] && backup "$hook_dst"
+    run install -m 755 "$hook_src" "$hook_dst"
+    say "  $hook_dst eingerichtet"
   fi
 fi
 

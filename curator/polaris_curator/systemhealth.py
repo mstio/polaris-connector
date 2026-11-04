@@ -29,6 +29,9 @@ POLARIS_CONFIG_DIR = HOME / ".config" / "polaris"
 MEMLINT = HOME / ".config" / "ai-agents" / "tools" / "memlint.py"
 MEMORY_MIRROR_STATE = HOME / ".local" / "state" / "polaris" / "memory-mirror.json"
 MEMORY_MIRROR_MAX_DAYS = 2
+# Sicherheitsabgleich von polaris-radar (seit 2026-11-02; Timer taeglich).
+SECURITY_STATE = HOME / ".local" / "state" / "polaris" / "security.json"
+SECURITY_MAX_DAYS = 3
 # memlint-Befunde, bei denen Wissen verloren gehen oder nach aussen gelangen
 # kann -> rot; alles andere (kaputter Verweis, fehlender Tag, Rueckkopie) gelb.
 MEMLINT_SEVERE = {"backup", "entrypoints", "secrets"}
@@ -540,6 +543,28 @@ def check_memory() -> dict:
     return _c("memory", label, level, detail + (f", {mirror}" if mirror else ""))
 
 
+def check_security(now: datetime) -> dict:
+    """Ergebnis des letzten Sicherheitsabgleichs (polaris-radar). Liest nur die
+    Zustandsdatei, kein Netz. Gelb, nie rot: Die Befunde brauchen eine
+    Bewertung (Fix-Stand, Betroffenheit), sie sind kein Ausfall."""
+    label = "Sicherheit"
+    try:
+        state = json.loads(SECURITY_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _c("security", label, "warn", "noch nicht geprüft – polaris-radar")
+    age = _age_days(state.get("checked_at"), now)
+    finds = state.get("findings") or []
+    if finds:
+        more = f" (+{len(finds) - 1} weitere)" if len(finds) > 1 else ""
+        return _c("security", label, "warn",
+                  f"{finds[0].get('text', '?')}{more} – handoff/omarchy-radar.md")
+    if age is None or age > SECURITY_MAX_DAYS:
+        return _c("security", label, "warn", f"zuletzt geprüft {_fmt_age(age)} – polaris-radar")
+    if state.get("error"):
+        return _c("security", label, "warn", f"Abgleich unvollständig ({state['error']}) – polaris-radar")
+    return _c("security", label, "ok", f"keine Befunde (geprüft {_fmt_age(age)})")
+
+
 def _polaris_config_value(key: str):
     return _read_polaris_yaml("config.yaml").get(key)
 
@@ -731,6 +756,7 @@ GROUPS = [
      "curator"),
     ("storage", "Speicher & Sicherung", [("Projektordner", "mount"), ("Backup", "backup")], "backup"),
     ("memory", "Maschinengedächtnis", [("Maschinengedächtnis", "memory")], "memory"),
+    ("security", "Sicherheit", [("Sicherheit", "security")], "security"),
 ]
 
 
@@ -795,6 +821,7 @@ def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_clau
         check_backup(now),
         check_mount(),
         check_memory(),
+        check_security(now),
         check_widget(),
         check_update(now),
     ]

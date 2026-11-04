@@ -85,6 +85,7 @@ extra "$AL_PLUGIN" mst.agent-launchers
 python3 "$REPO/scripts/privacy-check.py" "$STAGE" || {
   echo "FEHLER: private Inhalte im Paket (siehe oben) - nichts gebaut." >&2
   echo "  Fundstellen neutralisieren oder allgemeine Begriffe in ~/.config/polaris/bundle-allow.txt eintragen." >&2
+  echo "  Sensible Ordner statt per Namen per .polaris-protected bzw. ~/.config/polaris/protected.txt schuetzen." >&2
   exit 1
 }
 

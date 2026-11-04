@@ -1,0 +1,17 @@
+# polaris-radar: nach ~/.config/polaris/radar.yaml kopieren und anpassen.
+# Die Namen installierter Omarchy-Plugins zaehlen automatisch als Stichworte.
+days: 14                 # Zeitraum der Uebersicht
+keywords:                # ganze Woerter, Gross-/Kleinschreibung egal
+  - dictation
+  - alt+tab
+  - calendar
+  - dock
+  - backup
+watch_issues: []         # z. B. owner/repo#12 (vorgemerkte Fehler)
+watch_repos: []          # z. B. owner/repo (neueste Release, letzter Push)
+security:                # Sicherheitsabgleich (Arch Security Tracker, kernel.org, CISA KEV)
+  enabled: true
+  days: 30               # aktiv ausgenutzte Luecken (KEV) dieses Zeitraums
+  kernel_lag_warn: 4     # Warnung ab so vielen Stable-Releases Rueckstand
+  kev_aliases:           # KEV-Produkt (klein) -> Paketname
+    chromium v8: chromium

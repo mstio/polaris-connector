@@ -1,0 +1,11 @@
+[Unit]
+Description=Polaris: Omarchy-Radar und Sicherheitsabgleich (handoff/omarchy-radar.md)
+# Nur Netzabrufe (GitHub, Arch Security Tracker, kernel.org, CISA KEV), ~3 MB.
+# Ohne Netz Exit 75, die alte Datei bleibt; der naechste Lauf holt nach.
+
+[Service]
+Type=oneshot
+ExecCondition=%h/.local/bin/polaris-awake
+ExecStart=%h/.local/bin/polaris-radar --notify --quiet
+SuccessExitStatus=75
+Nice=10

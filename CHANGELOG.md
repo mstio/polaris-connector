@@ -8,6 +8,30 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- Neu: geschützte Ordner für die Privatsphäre-Prüfung (Paket und öffentlicher
+  Spiegel). Eine leere Datei `.polaris-protected` im Projektordner oder eine
+  Zeile in `~/.config/polaris/protected.txt` sperrt Pfad und Inhalt des Ordners
+  (Zeilen-Fingerabdrücke) statt nur seines Namens; ein allgemeines Wort wie der
+  Ordnername blockiert dann nicht mehr. Dazu ein `pre-push`-Hook im Spiegel-Klon,
+  den `publish-public.sh` einrichtet. Nacharbeit: keine.
+
+- Neu: Sicherheitsabgleich im Omarchy-Radar. `polaris-radar` gleicht installierte
+  Pakete mit dem Arch Security Tracker, den laufenden Kernel mit kernel.org-Stable
+  und aktiv ausgenutzte Lücken (CISA KEV) mit Kernel und Paketen ab; Abschnitt
+  „Sicherheit“ in `handoff/omarchy-radar.md`, Health-Check-Zeile „Sicherheit“.
+  `install.sh` (also auch `polaris update`) richtet dafür den Timer
+  `polaris-radar.timer` ein (täglich, ~3 MB); der Hook nach `omarchy update`
+  startet jetzt diese Unit. Abschalten in `~/.config/polaris/radar.yaml`
+  (`security: {enabled: false}`).
+
+- Neu: `polaris-radar` (Omarchy-Radar). Nach jedem `omarchy update` (Hook in
+  `~/.config/omarchy/hooks/post-update.d/`) und auf Anfrage schreibt es
+  `handoff/omarchy-radar.md`: Plugin-Updates, vorgemerkte Issues, passende
+  Omarchy-Neuerungen und neue Plugins. Agenten lesen es vor Omarchy-Anpassungen
+  (neue allgemeine Regel). Stichworte optional in `~/.config/polaris/radar.yaml`
+  (Vorlage `memory/tools/radar.example.yaml`). `install.sh` richtet Befehl und
+  Hook ein (`--no-memory` lässt beides aus).
+
 - Updates weisen auf Neues hin: `install.sh` (also auch `polaris update`)
   schreibt, was im CHANGELOG seit dem letzten Lauf neu ist, nach
   `~/.local/state/polaris/neu-seit-update.md` und als offenen Punkt nach

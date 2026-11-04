@@ -40,6 +40,14 @@ if [ -n "$(git -C "$PUBLIC_DIR" status --porcelain)" ]; then
   echo "FEHLER: $PUBLIC_DIR hat uncommittete Aenderungen." >&2; exit 1
 fi
 PUBLIC_REPO="$(cd "$PUBLIC_DIR" && gh repo view --json nameWithOwner -q .nameWithOwner)"
+# Zweites Netz: pre-push-Hook prueft auch direkte Pushes (seit 2026-11-04).
+HOOK="$PUBLIC_DIR/.git/hooks/pre-push"
+if [ ! -e "$HOOK" ] && [ ! -L "$HOOK" ]; then
+  ln -s "$REPO/scripts/public-pre-push" "$HOOK"
+  echo "pre-push-Hook im Spiegel eingerichtet: $HOOK"
+elif [ "$(readlink -f "$HOOK")" != "$REPO/scripts/public-pre-push" ]; then
+  echo "WARNUNG: $HOOK ist ein fremder Hook - Privatsphaere-Pruefung bei direktem Push fehlt." >&2
+fi
 
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT

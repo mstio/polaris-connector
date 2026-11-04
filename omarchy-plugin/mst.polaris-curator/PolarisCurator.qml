@@ -43,6 +43,33 @@ Panel {
     return (root.health && root.health.warnings) ? root.health.warnings : []
   }
 
+  // Omarchy's bar tooltip is a single unbounded Text: long health details ran
+  // off the screen. It keeps line breaks, so wrap at word boundaries here and
+  // cap the height; the panel shows the full text.
+  function wrapTooltip(text, width, maxLines) {
+    var words = String(text || "").split(/\s+/)
+    var lines = []
+    var line = ""
+    for (var i = 0; i < words.length; i++) {
+      var word = words[i]
+      if (word === "") continue
+      while (word.length > width) {
+        if (line !== "") { lines.push(line); line = "" }
+        lines.push(word.slice(0, width))
+        word = word.slice(width)
+      }
+      if (line === "") line = word
+      else if (line.length + 1 + word.length <= width) line += " " + word
+      else { lines.push(line); line = word }
+    }
+    if (line !== "") lines.push(line)
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines)
+      lines[maxLines - 1] = lines[maxLines - 1].slice(0, width - 2).replace(/\s+$/, "") + " …"
+    }
+    return lines.join("\n")
+  }
+
   function levelColor(level) {
     if (level === "error") return Commons.Color.urgent
     if (level === "warn") return "#e0a030"
@@ -272,13 +299,13 @@ Panel {
     bar: root.bar
     text: "\uf21e"
     fixedWidth: Style.bar.iconSlot
-    tooltipText: !root.installed ? "Polaris Curator ist nicht installiert"
+    tooltipText: root.wrapTooltip(!root.installed ? "Polaris Curator ist nicht installiert"
       : root.firstProblem() ? root.firstProblem().label + ": " + root.firstProblem().detail
       : root.healthWarnings().length > 0 ? "Polaris: " + root.healthWarnings()[0]
       : root.actionRunning ? "Polaris Curator läuft: " + root.actionTarget
       : root.pendingUnits() > 0
         ? "Alles in Ordnung · " + root.pendingProjects() + " Projekte mit offenen Quellen"
-        : "Health Check · alles in Ordnung"
+        : "Health Check · alles in Ordnung", 60, 8)
 
     Rectangle {
       anchors.right: parent.right

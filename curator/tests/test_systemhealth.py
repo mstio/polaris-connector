@@ -147,7 +147,7 @@ class TestChatgptArchive(unittest.TestCase):
     def test_no_chat_sources_omits_browser_checks(self):
         optional = ("check_separation", "check_journals", "check_curation",
                     "check_curator_timer", "check_llm", "check_backup", "check_mount",
-                    "check_memory", "check_widget", "check_update")
+                    "check_memory", "check_security", "check_widget", "check_update")
         patches = [patch.object(sh, name, return_value=None) for name in optional]
         patches += [patch.object(sh, "check_system", return_value=[]),
                     patch.object(sh, "check_archive"), patch.object(sh, "check_claude_archive"),
@@ -285,6 +285,32 @@ class TestSeparation(unittest.TestCase):
             self.assertIn("unlesbare", c["detail"])
 
 
+class TestSecurity(unittest.TestCase):
+    def _check(self, state):
+        f = Path(tempfile.mkdtemp()) / "security.json"
+        if state is not None:
+            f.write_text(json.dumps(state))
+        with patch.object(sh, "SECURITY_STATE", f):
+            return sh.check_security(datetime.now(timezone.utc))
+
+    def test_missing_state_is_warn(self):
+        self.assertEqual(self._check(None)["level"], "warn")
+
+    def test_fresh_without_findings_is_ok(self):
+        c = self._check({"checked_at": datetime.now(timezone.utc).isoformat(), "findings": []})
+        self.assertEqual(c["level"], "ok")
+
+    def test_findings_are_warn_never_error(self):
+        c = self._check({"checked_at": datetime.now(timezone.utc).isoformat(),
+                         "findings": [{"id": "kev:X", "text": "aktiv ausgenutzt: X"}, {"id": "y", "text": "y"}]})
+        self.assertEqual(c["level"], "warn")
+        self.assertIn("aktiv ausgenutzt: X (+1 weitere)", c["detail"])
+
+    def test_stale_is_warn(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        self.assertEqual(self._check({"checked_at": old, "findings": []})["level"], "warn")
+
+
 class TestCollect(unittest.TestCase):
     def test_overall_level_is_worst(self):
         ok = {"id": "a", "label": "A", "level": "ok", "detail": ""}
@@ -297,6 +323,7 @@ class TestCollect(unittest.TestCase):
              patch.object(sh, "check_separation", return_value=ok), \
              patch.object(sh, "check_journals", return_value=ok), \
              patch.object(sh, "check_memory", return_value=ok), \
+             patch.object(sh, "check_security", return_value=ok), \
              patch.object(sh, "check_llm", return_value=ok), \
              patch.object(sh, "check_widget", return_value=None):
             self.assertEqual(sh.collect({}, 3)["level"], "error")

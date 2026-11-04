@@ -136,6 +136,20 @@ Polaris-Wurzeln und Begriffe aus `~/.config/polaris/bundle-deny.txt`. Bei einem
 Treffer wird nichts gebaut. Allgemeine Ordnernamen stehen in
 `~/.config/polaris/bundle-allow.txt`; beide Listen bleiben lokal.
 
+Geschuetzte Ordner: Ein Projektordner mit der leeren Datei `.polaris-protected`
+oder ein Ordner in `~/.config/polaris/protected.txt` (eine Zeile je Ordner, `~`
+erlaubt) wird nicht ueber seinen Namen gesperrt, sondern ueber seinen Pfad und
+seinen Inhalt: Jede Textzeile daraus ab 30 Zeichen (ohne Polaris-Formatzeilen)
+bekommt einen Fingerabdruck, und eine solche Zeile im Paket ist ein Treffer.
+Treffer nennen nur Datei und Zeile, nie den Text; `bundle-allow.txt` hebt den
+Schutz nicht auf. Gelesen wird nur bei der Pruefung, Fingerabdruecke werden
+nicht gespeichert. Grenzen: nur Textdateien (PDF/Office nicht), nur woertliche
+Zeilen (umformulierte Inhalte erkennt die Pruefung nicht).
+
+Dieselbe Pruefung laeuft in `scripts/publish-public.sh` und als `pre-push`-Hook
+im Spiegel-Klon (`scripts/public-pre-push`, von `publish-public.sh` als Symlink
+eingerichtet), also auch bei einem direkten `git push` dorthin.
+
 Der Empfaenger braucht weder git noch GitHub-Zugang:
 
 ```bash

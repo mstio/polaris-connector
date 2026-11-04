@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# pre-push-Hook fuer den oeffentlichen Spiegel (seit 2026-11-04).
+# Prueft jeden Commit, der gepusht wird, mit scripts/privacy-check.py - auch
+# bei einem direkten "git push" am publish-public.sh vorbei. Bei einem Treffer
+# bricht der Push ab. Eingerichtet von publish-public.sh als Symlink
+# <Spiegel>/.git/hooks/pre-push -> <Polaris-Repo>/scripts/public-pre-push.
+# Umgehen nur mit Nutzerfreigabe: git push --no-verify.
+set -euo pipefail
+CHECK="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/privacy-check.py"
+[ -f "$CHECK" ] || { echo "pre-push: $CHECK fehlt - Push abgebrochen." >&2; exit 1; }
+
+ZERO=0000000000000000000000000000000000000000
+work="$(mktemp -d)"
+trap 'rm -rf -- "$work"' EXIT
+fail=0
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue                # Loeschen eines Zweigs
+  if [ "$remote_sha" = "$ZERO" ] || ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    range="$local_sha"                                   # neuer Zweig: alle Commits
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  for sha in $(git rev-list "$range"); do
+    rm -rf -- "$work/tree" && mkdir "$work/tree"
+    git archive "$sha" | tar -C "$work/tree" -xf -
+    if ! python3 "$CHECK" "$work/tree"; then
+      echo "pre-push: private Inhalte in Commit ${sha:0:7} - Push abgebrochen." >&2
+      fail=1
+    fi
+  done
+done
+exit "$fail"
