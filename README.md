@@ -1,26 +1,75 @@
+<div align="center">
+
 # Polaris
 
-Polaris keeps a curated, local memory for each of your projects. Conversations
-from ChatGPT and Claude projects, documents and mails flow into plain project
-folders; a curator turns them into condensed project knowledge
-(`knowledge.md`, `decisions.md`, `open-loops.md`). Everything stays on your
-machine as readable files. Built for [Omarchy](https://omarchy.org) (Arch Linux
-+ Hyprland), most parts work on any Linux desktop.
+### *Your project chats, documents and mails become a project memory you own, for [Omarchy](https://omarchy.org)*
 
-Principles:
+<p>
+  <a href="#install"><b>Install</b></a> •
+  <a href="#what-you-get"><b>What you get</b></a> •
+  <a href="#architecture-core-and-modules"><b>Architecture</b></a> •
+  <a href="#module-browser-capture-chatgpt-and-claude"><b>Browser capture</b></a> •
+  <a href="#cross-cutting-modules"><b>Health, radar, memory</b></a>
+</p>
 
-- **Local and readable.** Raw data and curated knowledge are plain JSON and
-  Markdown in your own folders. No database, no cloud service of its own.
-- **Files are the interface.** Components never import each other; they meet
-  in the project folder. Each part can be replaced or left out.
-- **Never guess.** Unclear project assignments wait for you instead of being
-  filed somewhere plausible.
+</div>
+
+You work on projects with ChatGPT and Claude, and the decisions, facts and
+open questions end up scattered across dozens of chats, documents and mails.
+Polaris collects them per project while you work and has the coding agent you
+already use write a short, sourced memory for each project: **what is known,
+what was decided, what is still open.** It lives as plain Markdown in your own
+project folders, readable by you, your editor and every AI agent on your
+machine.
+
+No account, no cloud service, no database. The only thing that leaves your
+computer is what the curator hands to your own agent CLI (Codex, Claude Code,
+or any command, local models included). Every entry links back to the chat
+message or file it came from.
+
+In daily use with **ChatGPT and Claude**, whose project chats are captured
+automatically. Any other assistant that organises work in projects (Gemini,
+Grok, Perplexity, …) can feed Polaris today through the inbox, as exported
+or pasted chats and documents. Automatic capture for another assistant means
+one more extension module plus its mapping in the bridge; contributions are
+welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## Install
+
+```bash
+git clone https://github.com/mstio/polaris-connector ~/Projects/polaris-connector
+~/Projects/polaris-connector/install.sh     # guided: asks, shows a summary, then sets up
+```
+
+Then install the signed Firefox extension from the
+[latest release](https://github.com/mstio/polaris-connector/releases/latest)
+and switch sync on for a ChatGPT or Claude project. `polaris update` keeps
+everything current. Details: [Quick start](#quick-start-on-a-new-omarchy-machine).
+
+## What you get
+
+- **Chats archived as you go.** A Firefox extension saves finished turns of
+  ChatGPT and Claude *project* chats into the matching project folder. No
+  copy and paste, nothing from chats outside a project. Other assistants:
+  via the inbox for now.
+- **Documents and mails, too.** Drop files or `.eml` mails (with attachments,
+  Word, Excel, PowerPoint) into a project's `inbox/`.
+- **A memory per project.** `knowledge.md`, `decisions.md` and
+  `open-loops.md`: condensed, deduplicated, kept current, every entry with its
+  source. Unclear cases wait for you; Polaris never guesses a project.
+- **One glance in your bar.** A theme-aware Omarchy widget shows new material
+  per project, starts curation, opens the knowledge files and tells you when
+  something is broken: capture, curation, backup, disk, security.
 - **Cheap in the background.** No polling daemons: systemd path units,
   timers and on-demand processes only.
+- **Optional extras:** a daily security check for your Omarchy machine
+  (Arch advisories, kernel, actively exploited CVEs), a shared memory for all
+  your local AI agents, and [omarchy-backup](https://github.com/mstio/omarchy-backup)
+  for snapshots and fresh-install recovery.
 
 Current extension version: see `extension/manifest.json`. What changed between
-versions, including side effects of `install.sh`: [`CHANGELOG.md`](CHANGELOG.md)
-(German). Most detailed documents in this repository are written in German.
+versions: [`CHANGELOG.md`](CHANGELOG.md) (German). Most detailed documents in
+this repository are written in German.
 
 ## Architecture: core and modules
 
@@ -39,8 +88,8 @@ healthy.
 | Cross-cutting: health check | One overview of capture, curation, backup, memory, security and system state | `curator/polaris_curator/systemhealth.py` |
 | Cross-cutting: radar | Omarchy news, plugin updates and a daily security check (Arch tracker, kernel, CISA KEV, NVD) | `memory/tools/polaris-radar` |
 | Cross-cutting: machine memory | Shared Markdown memory for all local AI agents, with linter, template and mirror | `memory/` |
-| Bundled (own repos) | [omarchy-backup](https://github.com/mstio/omarchy-backup) with its widget, agent launchers, dock | `extras/` in the install bundle only |
-| Developer tooling | Install bundle, privacy check with protected folders, public mirror | `make-bundle.sh`, `scripts/` |
+| Companion repos | [omarchy-backup](https://github.com/mstio/omarchy-backup) and [its widget](https://github.com/mstio/mst.omarchy-backup), [agent launchers](https://github.com/mstio/mst.agent-launchers), dock | fetched by `install.sh` via git |
+| Developer tooling | Privacy check with protected folders, template sync check, public mirror | `scripts/` |
 
 ```
  ChatGPT / Claude (Firefox)     official export      documents, mails
@@ -99,9 +148,12 @@ curator can still use another model via `runtime: command` and process inbox
 documents, and the missing extension is not reported. Grok chats are not
 captured.
 
-From a git checkout, omarchy-backup and the machine memory
-(`~/.config/ai-agents`) are optional; the health check then shows them as
-"not set up". The install bundle brings both (see below).
+omarchy-backup and the machine memory (`~/.config/ai-agents`) are optional
+(`--no-backup`, `--no-memory`); the health check then shows them as "not set
+up". Companion parts come from their own public git repositories: the
+backup and agent launcher widgets and the dock via `omarchy plugin add`, the
+omarchy-backup CLI via `git clone` into `~/.local/share/polaris/extras/`.
+Nothing else is downloaded and no packages are installed.
 
 Running `install.sh` with options (`--yes`, `--projects`, `--backup-target`,
 `--memory-mirror`, `--storage-unit`, `--no-units`, `--no-widget`, `--no-dock`,
@@ -119,9 +171,12 @@ polaris update --yes      # no question (for agents)
 polaris update --check    # only look; exit 0 = update available
 ```
 
-`update.sh` runs `git fetch`, fast-forward only, then `install.sh --yes` for
-what is already set up (units, widget, dock, memory), then
-`polaris-curator health`. Local commits or modified files abort the update
+`update.sh` runs `git fetch`, fast-forward only, then
+`install.sh --yes --only-existing` for what is already set up (units,
+widgets, dock, memory; nothing new is added), then `polaris-curator health`,
+and finally pulls the companion parts: the omarchy-backup checkout in
+`~/.local/share/polaris/extras/` (fast-forward) and the git-managed widgets
+(`omarchy plugin update`). Local commits or modified files abort the update
 (your own changes belong in a branch or pull request). If the health check
 turns red or `install.sh` fails, it goes back to the previous commit. At most
 once a day the health check shows "Update: available …". The version number
@@ -167,9 +222,17 @@ omarchy restart shell
 polaris update --check                           # "up to date"
 ```
 
-The widgets run from copies in `~/.config/omarchy/plugins/` and are not
-affected. Their sources under `polaris-extras/` are only needed for a fresh
-install. From then on `polaris update` is enough.
+The widgets keep running from their copies in `~/.config/omarchy/plugins/`,
+but copies are never updated. Switch them to git once, so that
+`polaris update` (via `omarchy plugin update`) keeps them current:
+
+```bash
+omarchy plugin remove mst.agent-launchers --yes && omarchy plugin add https://github.com/mstio/mst.agent-launchers.git --enable --yes
+omarchy plugin remove mst.omarchy-backup --yes && omarchy plugin add https://github.com/mstio/mst.omarchy-backup.git --enable --yes
+```
+
+`install.sh` reminds you of this while a copy is in place. From then on
+`polaris update` is enough.
 
 ## Core: project memory
 
@@ -609,34 +672,40 @@ links, tags, secrets and backup coverage; the health check shows the result.
   the last successful run is older than 2 days.
 - `--no-memory` skips all of this.
 
-### Bundled: omarchy-backup, agent launchers, dock
+### Companion repos: omarchy-backup, agent launchers, dock
 
-The install bundle carries [omarchy-backup](https://github.com/mstio/omarchy-backup)
-(snapshots, baseline drift, verified remote backup, fresh-install recovery)
-with its widget, and the agent launcher widget; `install.sh` can also install
-the dock. They are separate projects and only bundled for convenience.
-`--no-backup`, `--no-widget` and `--no-dock` leave them out.
+[omarchy-backup](https://github.com/mstio/omarchy-backup) (snapshots, baseline
+drift, verified remote backup, fresh-install recovery) with
+[its widget](https://github.com/mstio/mst.omarchy-backup), the
+[agent launcher widget](https://github.com/mstio/mst.agent-launchers) and the
+[dock](https://github.com/thepathless/omadock) are separate projects.
+`install.sh` fetches them from git, `polaris update` keeps them current. An
+existing installation of your own (for example an omarchy-backup checkout
+elsewhere) is left alone. `--no-backup`, `--no-widget` and `--no-dock` leave
+them out. On an existing installation, `install.sh --yes` does not add
+widgets you never had; it prints the `omarchy plugin add` command instead.
 
 ## Developer tooling
 
-### Install bundle (sharing without git)
+### Guided setup and offline installs
 
-`./make-bundle.sh` builds `dist/polaris-setup-<version>.tar.gz` and `.zip`
-with all of Polaris:
+Polaris is distributed through git only (the former install bundle was
+retired on 2026-11-04). `./install.sh` without options runs the guided setup.
+It asks for the projects folder, the curator model, background services and
+widgets, omarchy-backup with its target folder, and the machine memory with
+an optional mirror folder; it shows a summary and only then sets things up.
 
-- code, the newest signed `.xpi` and `install.sh`; no tests, experiments or
-  local data
-- `extras/`: omarchy-backup and the widgets, each at the committed state of
-  its own repository
-- `memory/`: `memlint.py` and an empty memory template, never its contents.
-  The build aborts if `memory/tools/memlint.py` differs from the live copy.
-
-The recipient needs neither git nor a GitHub account:
+For a machine without network, carry a git bundle on a stick and clone from
+it; `polaris update` works normally once the machine is online:
 
 ```bash
-unzip polaris-setup-<version>.zip          # or: tar -xzf polaris-setup-<version>.tar.gz
-bash polaris-setup-<version>/install.sh    # guided setup
+git -C ~/Projects/polaris-connector bundle create /run/media/<stick>/polaris.bundle --all   # on a connected machine
+git clone /run/media/<stick>/polaris.bundle ~/Projects/polaris-connector                    # on the new machine
+git -C ~/Projects/polaris-connector remote set-url origin https://github.com/mstio/polaris-connector.git
 ```
+
+The companion repos need the network once; without it, `install.sh` warns
+and you run it again later.
 
 The guided setup asks for the projects folder, the curator model, background
 services and widgets, omarchy-backup with its target folder, and the machine
@@ -647,13 +716,17 @@ state and open items. If the installation stops, it names step, reason, log
 and the guide [`docs/AGENTEN-LEITFADEN.md`](docs/AGENTEN-LEITFADEN.md)
 (German), so that a local AI agent can carry on by itself.
 
-From a bundle, `install.sh` copies the program files to
-`~/.local/share/polaris/app` and installs from there (update: run a newer
-bundle the same way; the old version goes to
-`~/.local/share/polaris/install-backups/`). It also sets up omarchy-backup
-(link, default configuration, widget) and registers the program folder in its
-`paths.d/`; with a target folder it enables daily snapshots. You set the
-baseline yourself.
+Started without `.git` (an old install bundle or a GitHub "Download ZIP"),
+`install.sh` copies the program files to `~/.local/share/polaris/app` and
+installs from there; switch to a git checkout to get updates (see above).
+`install.sh` also sets up omarchy-backup (link, default configuration,
+widget) and registers the program folder in its `paths.d/`; with a target
+folder it enables daily snapshots. You set the baseline yourself.
+
+**Template sync (maintainer).** `scripts/check-sync.sh` checks that
+`memory/tools/memlint.py`, the shared skills and the generated
+`memory/template/AGENTS.md` match the live copies under `~/.config/ai-agents`.
+`publish-public.sh` refuses to publish otherwise.
 
 ### Privacy check and protected folders
 
@@ -685,7 +758,8 @@ any mechanical check.
 Development happens in a private repository with full history. Released
 states go to this public repository with
 `scripts/publish-public.sh [<ref>] [--push]`, one commit per release, without
-history and without binary bundles, after the same privacy check. Tests and
+history and without binary archives, after the template sync check and the
+same privacy check. Tests and
 comments therefore use invented names only (Kunde-A, Musterfirma, …). A
 `pre-push` hook in the mirror clone (`scripts/public-pre-push`, linked by
 `publish-public.sh`) runs the check on every pushed commit, including author,
@@ -698,7 +772,8 @@ contributors and their AI agents: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 | What | Path |
 |---|---|
-| Code (git checkout) | `~/Projects/polaris-connector/` (or `~/.local/share/polaris/app` from a bundle) |
+| Code (git checkout) | `~/Projects/polaris-connector/` (older installs from the bundle: `~/.local/share/polaris/app`) |
+| Companion CLI | `~/.local/share/polaris/extras/omarchy-backup/` (git checkout, if no own installation exists) |
 | CLIs | `~/.local/bin/polaris`, `polaris-curator`, `polaris-radar`, `polaris-memory-mirror` |
 | Configuration | `~/.config/polaris/` (`config.yaml` with `project_roots`, `projects.yaml` mappings, `curator.yaml`, `radar.yaml`) |
 | Browser inbox | `~/Downloads/polaris-inbox/` |

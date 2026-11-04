@@ -90,4 +90,4 @@ Maschinengedächtnis ~/.config/ai-agents                Regeln + Notizen aller A
 - `polaris-curator llm-check [--call]`: Modell und Anmeldung
 - `systemctl --user list-timers 'polaris-*' 'omarchy-backup-*'`
 - `journalctl --user -u polaris-curator.service --since today`
-- Ausführliche Bedienung: `README.md` und `curator/README.md` im Programmordner, `extras/omarchy-backup/README.md`.
+- Ausführliche Bedienung: `README.md` und `curator/README.md` im Programmordner, für omarchy-backup dessen `README.md` im eigenen Checkout (Standard `~/.local/share/polaris/extras/omarchy-backup/`).

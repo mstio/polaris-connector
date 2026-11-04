@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Richtet Polaris (Bridge, Curator, Health-Check-Widget; aus dem Paket auch
+# Richtet Polaris (Bridge, Curator, Health-Check-Widget, auf Wunsch
 # omarchy-backup mit Widget und das Maschinengedaechtnis) auf einem Omarchy-
 # Rechner ein - idempotent, auf dem Entwicklungsrechner ein No-op (seit 2026-10-07).
 #
@@ -26,7 +26,9 @@
 #   --no-dock    das Dock (omadock, oeffentliches git-Repo) nicht installieren
 #   --no-restart Omarchy-Leiste am Ende nicht neu starten (sonst: nur wenn
 #                Plugins kopiert/aktiviert wurden und kein Curator-Lauf aktiv ist)
-#   --no-backup  omarchy-backup (extras/ im Paket) nicht einrichten
+#   --no-backup  omarchy-backup (eigenes oeffentliches git-Repo) nicht einrichten
+#   --only-existing  nur Vorhandenes aktualisieren, keine Widgets/Dock neu holen
+#                (fuer 'polaris update': ein Update richtet nichts Neues ein)
 #   --no-memory  Maschinengedaechtnis (~/.config/ai-agents) nicht anlegen/aktualisieren
 #   --backup-target  Ordner fuer die Sicherungen von omarchy-backup (z. B. auf
 #                einem Cloud-Laufwerk); schaltet die taeglichen Snapshots ein
@@ -39,12 +41,17 @@
 #                (z. B. <Projektordner>/Polaris/Maschinengedaechtnis); fehlt
 #                ~/.config/ai-agents, wird es von dort zurueckgeholt
 #
-# Aus einem Installationspaket (make-bundle.sh) gestartet, kopiert es die
-# Programmdateien zuerst nach ~/.local/share/polaris/app und installiert von
-# dort; ein git-Checkout bleibt, wo er ist.
+# Polaris wird per git verteilt (seit 2026-11-04, kein Installationspaket
+# mehr). Ohne .git gestartet (z. B. GitHub-"Download ZIP" oder ein altes
+# Paket), kopiert es die Programmdateien zuerst nach
+# ~/.local/share/polaris/app und installiert von dort.
 #
-# Installiert keine Pakete und aus dem Netz nur das Dock (omadock per
-# 'omarchy plugin add', abschaltbar mit --no-dock). Ersetzte Dateien werden
+# Installiert keine Pakete. Aus dem Netz holt es nur die Bausteine aus
+# eigenen oeffentlichen git-Repos: die Widgets (Backup, Agenten-Starter) und
+# das Dock per 'omarchy plugin add' (danach aktualisiert sie 'omarchy plugin
+# update'), die omarchy-backup-CLI per git clone nach
+# ~/.local/share/polaris/extras/ (aktualisiert von 'polaris update').
+# Abschaltbar mit --no-widget, --no-dock, --no-backup. Ersetzte Dateien werden
 # vorher nach ~/.local/share/polaris/install-backups/<Zeit>/ gesichert.
 # Die Firefox-Erweiterung selbst (AMO, signiert) wird von Hand installiert,
 # siehe README "Installing the extension".
@@ -56,10 +63,26 @@ UNIT_DIR="$HOME/.config/systemd/user"
 POLARIS_CFG="$HOME/.config/polaris"
 PLUGIN_ID="mst.polaris-curator"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+# Ein Update richtet nichts Neues ein: --only-existing (neues update.sh) oder
+# Aufruf durch ein update.sh (aelteres update.sh kennt die Option nicht; erster
+# Update-Lauf nach 2026-11-04). Ein Neulauf von Hand nach einer abgebrochenen
+# Erstinstallation holt fehlende Widgets dagegen nach.
+NO_NEW=0
+NO_NEW_REASON=""
+# Nur ein Argument, das auf update.sh endet (Skriptpfad), nicht jede Erwaehnung
+# im Befehlstext (z. B. bash -c "...update.sh --check; ./install.sh ...").
+if [ -r "/proc/$PPID/cmdline" ] && tr '\0' '\n' < "/proc/$PPID/cmdline" | grep -qE '(^|/)update\.sh$'; then
+  NO_NEW=1 NO_NEW_REASON="Aufruf durch update.sh erkannt"
+fi
 BACKUP_DIR="$HOME/.local/share/polaris/install-backups/$(date +%Y%m%d-%H%M%S)"
+# Bausteine aus eigenen oeffentlichen Repos (seit 2026-11-04 statt extras/ im Paket)
+EXTRAS_DIR="$HOME/.local/share/polaris/extras"
+OB_URL="https://github.com/mstio/omarchy-backup.git"
+OB_PLUGIN_URL="https://github.com/mstio/mst.omarchy-backup.git"
+AL_URL="https://github.com/mstio/mst.agent-launchers.git"
 
 ORIG_ARGS=("$@")  # fuer den Neustart aus dem App-Ordner (die Schleife verbraucht "$@")
-DRY=0 PROJECTS="" RUNTIME="" CHAT_SOURCES="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR=""
+ONLY_EXISTING=0 DRY=0 PROJECTS="" RUNTIME="" CHAT_SOURCES="" STORAGE_UNIT="" UNITS=1 WIDGET=1 DOCK=1 RESTART=1 OBACKUP=1 MEMORY=1 YES=0 OB_TARGET="" MIRROR=""
 GUIDED=0; [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ] && GUIDED=1
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,6 +93,7 @@ while [ $# -gt 0 ]; do
     --no-units) UNITS=0 ;;
     --no-widget) WIDGET=0 ;;
     --no-dock) DOCK=0 ;;
+    --only-existing) ONLY_EXISTING=1 NO_NEW=1 NO_NEW_REASON="--only-existing" ;;
     --no-restart) RESTART=0 ;;
     --no-backup) OBACKUP=0 ;;
     --no-memory) MEMORY=0 ;;
@@ -85,7 +109,7 @@ done
 case "$RUNTIME" in ""|codex|claude|command) ;; *) echo "--runtime: codex, claude oder command" >&2; exit 2 ;; esac
 case "$CHAT_SOURCES" in ""|both|chatgpt|claude|none) ;; *) echo "--chat-sources: both, chatgpt, claude oder none" >&2; exit 2 ;; esac
 
-# Aus einem Installationspaket (make-bundle.sh, ohne .git) gestartet: Die
+# Ohne .git gestartet (GitHub-ZIP, altes Installationspaket): Die
 # Programmdateien kommen an einen festen Ort, damit Befehle, Units und Native
 # Host nicht auf ~/Downloads zeigen. Aus einem git-Checkout bleibt alles dort.
 APP_DIR="$HOME/.local/share/polaris/app"
@@ -138,6 +162,25 @@ ask_yn() {  # ask_yn <Frage> <j|n> -> Exit 0 bei ja
 }
 tilde() { printf '%s' "${1/#$HOME/\~}"; }
 SHELL_RESTART=0  # 1, sobald ein Plugin neu kopiert/aktiviert wurde
+install_plugin_git() {  # install_plugin_git <id> <git-URL>: wie 'omarchy plugin add', danach 'omarchy plugin update'
+  local id="$1" url="$2"
+  step "Omarchy-Widget ($id)"
+  local dir="$HOME/.config/omarchy/plugins/$id"
+  if [ -d "$dir" ]; then
+    if [ -d "$dir/.git" ]; then say "  vorhanden (git, aktualisiert von 'omarchy plugin update')"
+    else say "  vorhanden als Kopie, wird nicht aktualisiert; umstellen: omarchy plugin remove $id && omarchy plugin add $url --enable"; fi
+    # z. B. nach 'plugin add' ohne laufende Shell: geklont, aber nie aktiviert
+    if ! plugin_enabled "$id"; then
+      run omarchy plugin enable "$id" && SHELL_RESTART=1 || warn "$id liess sich nicht aktivieren: omarchy plugin enable $id"
+    fi
+  elif [ "$NO_NEW" = 1 ]; then
+    say "  nicht eingerichtet, bleibt so (Update richtet nichts Neues ein; holen: omarchy plugin add $url --enable)"
+  elif run omarchy plugin add "$url" --enable --yes 2>&1 | sed 's/^/  /'; then
+    SHELL_RESTART=1
+  else
+    warn "$id nicht installiert (Netz?): omarchy plugin add $url --enable"
+  fi
+}
 plugin_known() {  # plugin_known <id> -> Exit 0, wenn die laufende Shell das Plugin kennt
   omarchy plugin list --json 2>/dev/null | python3 -c \
     "import json,sys; sys.exit(0 if any(p.get('id')==sys.argv[1] for p in json.load(sys.stdin)) else 1)" "$1"
@@ -234,15 +277,15 @@ TXT
   say ""
   ask_yn "3) Hintergrunddienste einrichten (Bridge alle 10 min, Curator nachts)?" j && UNITS=1 || UNITS=0
   if command -v omarchy >/dev/null; then
-    ask_yn "   Widgets in der Omarchy-Leiste anzeigen (Health Check, Backup, Agenten-Starter)?" j && WIDGET=1 || WIDGET=0
+    ask_yn "   Widgets in der Omarchy-Leiste anzeigen (Health Check, Backup, Agenten-Starter; die beiden letzten von GitHub)?" j && WIDGET=1 || WIDGET=0
     ask_yn "   Dock (omadock) installieren? Wird von GitHub geholt." j && DOCK=1 || DOCK=0
   else
     WIDGET=0 DOCK=0
   fi
   # 4. omarchy-backup
-  if [ -d "$REPO/extras/omarchy-backup" ]; then
+  if command -v git >/dev/null; then
     say ""
-    say "4) omarchy-backup sichert Konfiguration, Themes, Plugins und Paketlisten als Snapshots."
+    say "4) omarchy-backup sichert Konfiguration, Themes, Plugins und Paketlisten als Snapshots (von GitHub)."
     if ask_yn "   Einrichten?" j; then
       OBACKUP=1
       say "   Wohin sollen die Snapshots? (z. B. ein Ordner auf einem Cloud-Laufwerk; leer = spaeter)"
@@ -275,7 +318,7 @@ TXT
   say "  Hintergrunddienste:  $([ "$UNITS" = 1 ] && echo ja || echo nein)"
   say "  Widgets:             $([ "$WIDGET" = 1 ] && echo ja || echo nein)"
   say "  Dock (omadock):      $([ "$DOCK" = 1 ] && echo ja || echo nein)"
-  [ -d "$REPO/extras/omarchy-backup" ] && \
+  command -v git >/dev/null && \
   say "  omarchy-backup:      $([ "$OBACKUP" = 1 ] && echo "ja, Ziel: $(tilde "${OB_TARGET:-(spaeter)}")" || echo nein)"
   [ -d "$REPO/memory/template" ] && \
   say "  Maschinengedaechtnis: $([ "$MEMORY" = 1 ] && echo "ja, Spiegel: $(tilde "${MIRROR:-(keiner)}")" || echo nein)"
@@ -302,6 +345,7 @@ if [ "$DRY" = 0 ]; then
   exec > >(tee -a "$LOG") 2>&1
   say "INSTALL: $(date -Iseconds) Protokoll $LOG"
   say "INSTALL: Optionen ${ORIG_ARGS[*]:-(gefuehrt)}"
+  if [ "$NO_NEW" = 1 ]; then say "INSTALL: richtet nichts Neues ein ($NO_NEW_REASON)"; fi
   say "INSTALL: Auswahl projects=${PROJECTS:-} runtime=${RUNTIME:-auto} chat_sources=${CHAT_SOURCES:-template} units=$UNITS widget=$WIDGET dock=$DOCK backup=$OBACKUP backup_target=${OB_TARGET:-} memory=$MEMORY memory_mirror=${MIRROR:-}"
 fi
 
@@ -376,6 +420,8 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ] && [ ! -e "$MEM" ]; then
     run mkdir -p "$MEM"/handoff "$MEM"/knowledge "$MEM"/history "$MEM"/system-history "$MEM"/tools
     run cp -n "$REPO"/memory/template/AGENTS.md "$REPO"/memory/template/AI_HANDOFF.md \
       "$REPO"/memory/template/entrypoints.conf "$MEM/"
+    # Platzhalter, bis polaris-radar das erste Mal laeuft (AGENTS.md verweist darauf)
+    run cp -n "$REPO"/memory/template/handoff/omarchy-radar.md "$MEM/handoff/"
     say "  aus der Vorlage angelegt - AGENTS.md und AI_HANDOFF.md an den Rechner anpassen"
     AGENTS_FROM_TEMPLATE=1
   fi
@@ -557,9 +603,8 @@ if [ "$WIDGET" = 1 ]; then
   else
     install_plugin_copy "$PLUGIN_ID" "$REPO/omarchy-plugin/$PLUGIN_ID" center
     command -v jq >/dev/null || warn "jq fehlt - das Widget braucht es (sudo pacman -S jq)"
-    # Agenten-Starter (Claude, Codex, Antigravity) liegt nur im Paket bei (extras/)
-    [ -d "$REPO/extras/mst.agent-launchers" ] \
-      && install_plugin_copy mst.agent-launchers "$REPO/extras/mst.agent-launchers"
+    # Agenten-Starter (Claude, Codex, Antigravity): eigenes oeffentliches Repo
+    install_plugin_git mst.agent-launchers "$AL_URL"
   fi
 fi
 
@@ -567,17 +612,7 @@ fi
 # damit 'omarchy plugin update' es weiter aktualisieren kann.
 DOCK_ID="omadock" DOCK_URL="https://github.com/thepathless/omadock.git"
 if [ "$DOCK" = 1 ] && command -v omarchy >/dev/null; then
-  step "Dock ($DOCK_ID)"
-  if [ -d "$HOME/.config/omarchy/plugins/$DOCK_ID" ]; then
-    say "  vorhanden"
-    if ! plugin_enabled "$DOCK_ID"; then
-      run omarchy plugin enable "$DOCK_ID" && SHELL_RESTART=1 || warn "Dock liess sich nicht aktivieren: omarchy plugin enable $DOCK_ID"
-    fi
-  elif run omarchy plugin add "$DOCK_URL" --enable --yes 2>&1 | sed 's/^/  /'; then
-    SHELL_RESTART=1
-  else
-    warn "Dock nicht installiert (Netz?): omarchy plugin add $DOCK_URL --enable"
-  fi
+  install_plugin_git "$DOCK_ID" "$DOCK_URL"
 fi
 
 # Omarchy-Radar nach jedem 'omarchy update' (Hook, kein Timer): neue Omarchy-
@@ -596,16 +631,20 @@ if [ "$MEMORY" = 1 ] && command -v omarchy >/dev/null; then
   fi
 fi
 
-# omarchy-backup und sein Widget liegen nur im Installationspaket bei
-# (extras/, make-bundle.sh). Ein vorhandener git-Checkout bleibt unangetastet.
+# omarchy-backup: eigenes oeffentliches Repo, per git clone nach
+# ~/.local/share/polaris/extras/ (seit 2026-11-04; ein altes Paket bringt es
+# noch als extras/ mit). Eine vorhandene eigene Installation bleibt unangetastet.
 OB_SRC="$REPO/extras/omarchy-backup"
-if [ "$OBACKUP" = 1 ] && [ -d "$OB_SRC" ]; then
+[ -d "$OB_SRC" ] || OB_SRC="$EXTRAS_DIR/omarchy-backup"
+if [ "$OBACKUP" = 1 ]; then
   step "omarchy-backup (CLI)"
   current="$(readlink -f "$BIN_DIR/omarchy-backup" 2>/dev/null || true)"
   if [ "$current" = "$OB_SRC/bin/omarchy-backup" ]; then
     say "  ok ($OB_SRC)"
   elif [ -n "$current" ] && [ -e "$current" ]; then
     say "  eigene Installation vorhanden ($current), unveraendert"
+  elif [ ! -d "$OB_SRC" ] && ! { run mkdir -p "$EXTRAS_DIR" && run git clone --quiet "$OB_URL" "$OB_SRC"; }; then
+    warn "omarchy-backup nicht geholt (Netz?): git clone $OB_URL $OB_SRC"
   else
     if [ "$DRY" = 1 ]; then run "$OB_SRC/install.sh"
     else "$OB_SRC/install.sh" | sed 's/^/  /'; fi
@@ -624,8 +663,8 @@ if [ "$OBACKUP" = 1 ] && [ -d "$OB_SRC" ]; then
     fi
   fi
   OB_PLUGIN_ID="mst.omarchy-backup"
-  if [ "$WIDGET" = 1 ] && [ -d "$REPO/extras/$OB_PLUGIN_ID" ] && command -v omarchy >/dev/null; then
-    install_plugin_copy "$OB_PLUGIN_ID" "$REPO/extras/$OB_PLUGIN_ID"
+  if [ "$WIDGET" = 1 ] && command -v omarchy >/dev/null; then
+    install_plugin_git "$OB_PLUGIN_ID" "$OB_PLUGIN_URL"
   fi
 fi
 
@@ -742,6 +781,27 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ]; then
       warn "Allgemeine Agentenregeln haben sich geändert: $(tilde "$tmpl") mit ~/.config/ai-agents/AGENTS.md vergleichen, dem Nutzer die neuen oder geänderten Regeln mit ihrem Nutzen vorstellen und gemeinsam entscheiden, was übernommen wird (nichts ungefragt, eigene Regeln bleiben). Danach quittieren: sha256sum $(tilde "$tmpl") | cut -d' ' -f1 > $(tilde "$ack")"
     fi
   fi
+  # Platzhalter auch fuer bestehende Gedaechtnisse, deren AGENTS.md schon auf
+  # den Radar verweist (sonst memlint-Fehler bis zum ersten Radar-Lauf)
+  # Der Radar schreibt handoff/omarchy-radar.md, traegt es aber nicht in den
+  # Index ein (memlint: "nicht im Index verlinkt").
+  radar_md="$MEM/handoff/omarchy-radar.md"
+  if [ -e "$radar_md" ] || grep -qs 'handoff/omarchy-radar.md' "$MEM/AGENTS.md"; then
+    if [ ! -e "$radar_md" ]; then
+      run mkdir -p "$MEM/handoff"
+      run cp -n "$REPO/memory/template/handoff/omarchy-radar.md" "$MEM/handoff/"
+      say "  Platzhalter handoff/omarchy-radar.md angelegt (polaris-radar ersetzt ihn)"
+    fi
+    if [ -f "$MEM/AI_HANDOFF.md" ] && ! grep -qs 'handoff/omarchy-radar.md' "$MEM/AI_HANDOFF.md"; then
+      if grep -v '^[[:space:]]*$' "$MEM/AI_HANDOFF.md" | tail -n 1 | grep -q '^|'; then
+        row='| `handoff/omarchy-radar.md` | Omarchy-Radar: Neuigkeiten, Plugin-Updates, Sicherheit (erzeugt von `polaris-radar`) | automatisch |'
+      else
+        row='- `handoff/omarchy-radar.md`: Omarchy-Radar, Neuigkeiten, Plugin-Updates, Sicherheit (erzeugt von `polaris-radar`)'
+      fi
+      if [ "$DRY" = 1 ]; then say "  [dry-run] Indexeintrag handoff/omarchy-radar.md"
+      else printf '%s\n' "$row" >> "$MEM/AI_HANDOFF.md"; say "  Index: handoff/omarchy-radar.md eingetragen"; fi
+    fi
+  fi
   if [ "$DRY" = 1 ]; then run python3 "$MEM/tools/memlint.py" --link
   else python3 "$MEM/tools/memlint.py" --link 2>&1 | sed 's/^/  /' || warn "memlint meldet Fehler: python3 $MEM/tools/memlint.py"; fi
   if [ -n "$mirror_cfg" ] && [ "$DRY" = 0 ]; then
@@ -789,5 +849,5 @@ fi
 say "  - polaris roots add <Ordner>          # wo die Projektordner liegen"
 say "  - polaris-curator llm-check --call    # Anmeldung und Modell pruefen"
 say "  Fuer AI-Agenten auf diesem Rechner: $(tilde "$GUIDE")"
-[ -d "$REPO/extras/omarchy-backup" ] \
-  || say "  Optional: omarchy-backup (eigenes Repo) fuer Snapshots; der Health Check meldet es sonst als 'nicht eingerichtet'."
+[ "$OBACKUP" = 1 ] \
+  || say "  Optional: omarchy-backup ($OB_URL) fuer Snapshots; der Health Check meldet es sonst als 'nicht eingerichtet'."

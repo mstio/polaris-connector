@@ -8,6 +8,22 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- Polaris wird nur noch per git verteilt; das Installationspaket (`make-bundle.sh`,
+  `dist/polaris-setup-*`) entfällt. `install.sh` holt die Begleit-Repos selbst:
+  Backup-Widget, Agenten-Starter und Dock per `omarchy plugin add` (danach
+  `omarchy plugin update`), die omarchy-backup-CLI per `git clone` nach
+  `~/.local/share/polaris/extras/` – nur, wenn es noch keine eigene Installation
+  gibt. `polaris update` zieht diese Teile mit und richtet nichts Neues ein
+  (`install.sh --only-existing`; auf bestehenden Installationen fügt auch
+  `install.sh --yes` keine neuen Widgets hinzu, sondern nennt den Befehl).
+  Das Gedächtnis bekommt einen Platzhalter `handoff/omarchy-radar.md` samt
+  Indexeintrag, auch ein bestehendes (sonst meldete memlint „fehlende Datei“
+  bzw. „nicht im Index verlinkt“, weil der Radar sich nicht selbst einträgt).
+  Ein vorhandenes, aber nie aktiviertes Widget wird jetzt aktiviert; Widgets,
+  die noch als Kopie aus dem alten Paket laufen, nennen den Umstieg auf git.
+  Gleichstand der Vorlagen prüft `scripts/check-sync.sh`. Nacharbeit: keine;
+  Installationen aus dem alten Paket steigen einmal auf git um (README).
+
 - README und CONTRIBUTING auf Englisch, die README nach Kern und Modulen gegliedert
   (Projektgedächtnis als Kern; Quellen, Modell-Runtimes, Widget, Health Check,
   Radar, Maschinengedächtnis als Module). Übrige Doku bleibt deutsch. Nacharbeit: keine.

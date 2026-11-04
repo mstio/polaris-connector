@@ -12,7 +12,7 @@ CHECK="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/privacy-check.py"
 ZERO=0000000000000000000000000000000000000000
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
-fail=0
+fail=0 dirs=()
 while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ "$local_sha" = "$ZERO" ] && continue                # Loeschen eines Zweigs
   if [ "$remote_sha" = "$ZERO" ] || ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
@@ -21,19 +21,17 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
     range="$remote_sha..$local_sha"
   fi
   for sha in $(git rev-list "$range"); do
-    rm -rf -- "$work/tree" && mkdir "$work/tree"
-    git archive "$sha" | tar -C "$work/tree" -xf -
-    if ! python3 "$CHECK" "$work/tree"; then
-      echo "pre-push: private Inhalte in Commit ${sha:0:7} - Push abgebrochen." >&2
-      fail=1
-    fi
-    # Metadaten (Autor, Committer, Nachricht) sind ebenfalls oeffentlich.
-    rm -rf -- "$work/meta" && mkdir "$work/meta"
-    git log -1 --format='%an <%ae>%n%cn <%ce>%n%B' "$sha" > "$work/meta/commit.txt"
-    if ! python3 "$CHECK" "$work/meta"; then
-      echo "pre-push: private Angaben in Autor/Nachricht von Commit ${sha:0:7} - Push abgebrochen." >&2
-      fail=1
-    fi
+    # Inhalt und Metadaten (Autor, Committer, Nachricht) sind oeffentlich.
+    c="$work/${sha:0:12}" m="$work/${sha:0:12}-meta"
+    mkdir -p "$c" "$m"
+    git archive "$sha" | tar -C "$c" -xf -
+    git log -1 --format='%an <%ae>%n%cn <%ce>%n%B' "$sha" > "$m/commit.txt"
+    dirs+=("$c" "$m")
   done
 done
+# Ein Aufruf fuer alle Commits: der geschuetzte Ordner wird nur einmal gelesen.
+if [ "${#dirs[@]}" -gt 0 ] && ! python3 "$CHECK" "${dirs[@]}"; then
+  echo "pre-push: private Inhalte oder Angaben in Autor/Nachricht (siehe oben; Ordnername = Commit) - Push abgebrochen." >&2
+  fail=1
+fi
 exit "$fail"

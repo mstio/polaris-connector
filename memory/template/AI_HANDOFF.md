@@ -1,6 +1,6 @@
 # Maschinengedächtnis — Index
 
-<!-- Vorlage aus dem Polaris-Installationspaket. -->
+<!-- Vorlage aus Polaris (memory/template). -->
 
 Gemeinsames Gedächtnis dieses Rechners, das alle lokalen Agenten lesen und schreiben. Es besteht aus reinen Markdown-Dateien und ist mit jedem Editor lesbar. Diese Datei ist der **Index**.
 
@@ -32,3 +32,4 @@ Pro Thema gibt es bis zu drei Dateien mit gleichem Namen:
 
 | Datei | Thema | Status |
 |---|---|---|
+| `handoff/omarchy-radar.md` | Omarchy-Radar: Neuigkeiten, Plugin-Updates, Sicherheit (erzeugt von `polaris-radar`) | Platzhalter bis zum ersten Lauf |

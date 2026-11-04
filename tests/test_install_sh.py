@@ -1,0 +1,132 @@
+"""Tests fuer install.sh: Begleit-Widgets per git, Update richtet nichts Neues ein.
+
+Laufen in einem eigenen HOME mit Platzhaltern fuer omarchy, omarchy-shell und
+systemctl; 'omarchy plugin add' legt nur einen Ordner an (kein Netz).
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+
+OMARCHY_STUB = r"""#!/usr/bin/env bash
+P="$HOME/.config/omarchy/plugins"; E="$HOME/.omarchy-enabled"; L="$HOME/.omarchy-calls"; touch "$E"
+echo "$*" >> "$L"
+case "$1 $2" in
+  "plugin list") python3 - "$P" "$E" <<'PY'
+import json,os,sys
+p,e=sys.argv[1:3]; en=set(open(e).read().split())
+print(json.dumps([{"id":d,"enabled":d in en} for d in (os.listdir(p) if os.path.isdir(p) else [])]))
+PY
+  ;;
+  "plugin add") id=$(basename "$3" .git); mkdir -p "$P/$id/.git" && echo "$id" >> "$E";;
+  "plugin enable") echo "$3" >> "$E";;
+  *) :;;
+esac
+"""
+
+BASE_ARGS = ["--yes", "--no-backup", "--no-memory", "--no-units", "--no-restart"]
+
+
+class InstallShTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        base = Path(self._tmp.name)
+        self.home = base / "home"
+        (self.home / "Projekte" / "Kunde-A").mkdir(parents=True)
+        stub = base / "stub"
+        stub.mkdir()
+        (stub / "omarchy").write_text(OMARCHY_STUB)
+        for name in ("systemctl", "omarchy-shell"):
+            (stub / name).write_text("#!/bin/sh\nexit 0\n")
+        for f in stub.iterdir():
+            f.chmod(0o755)
+        self.base = base
+        self.env = {"HOME": str(self.home), "PATH": f"{stub}:/usr/bin:/bin", "USER": "test",
+                    "GIT_CONFIG_GLOBAL": os.devnull, "POLARIS_NO_NOTIFY": "1", "LANG": "C.UTF-8"}
+        self.plugins = self.home / ".config" / "omarchy" / "plugins"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def install(self, *args, via=None):
+        cmd = [str(REPO / "install.sh"), *args]
+        if via:  # Aufruf ueber ein Skript dieses Namens (Elternprozess wie bei update.sh)
+            wrapper = self.base / via
+            wrapper.write_text(f'#!/usr/bin/env bash\n"{REPO / "install.sh"}" "$@"\n')
+            wrapper.chmod(0o755)
+            cmd = [str(wrapper), *args]
+        return subprocess.run(cmd, env=self.env, capture_output=True, text=True, timeout=300)
+
+    def enabled(self) -> set[str]:
+        f = self.home / ".omarchy-enabled"
+        return set(f.read_text().split()) if f.exists() else set()
+
+    def test_fresh_install_adds_companion_widgets(self):
+        r = self.install(*BASE_ARGS, "--projects", str(self.home / "Projekte"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for pid in ("mst.polaris-curator", "mst.agent-launchers", "omadock"):
+            self.assertTrue((self.plugins / pid).is_dir(), pid)
+            self.assertIn(pid, self.enabled())
+
+    def test_existing_disabled_plugin_gets_enabled(self):
+        (self.plugins / "omadock" / ".git").mkdir(parents=True)   # geklont, nie aktiviert
+        r = self.install(*BASE_ARGS)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("omadock", self.enabled())
+
+    def test_update_parent_adds_nothing_new(self):
+        self.install(*BASE_ARGS)
+        (self.home / ".omarchy-enabled").write_text("mst.polaris-curator\nomadock\n")
+        subprocess.run(["rm", "-rf", str(self.plugins / "mst.agent-launchers")], check=True)
+        r = self.install(*BASE_ARGS, via="update.sh")          # wie ein aelteres update.sh
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse((self.plugins / "mst.agent-launchers").exists())
+        self.assertIn("nicht eingerichtet, bleibt so", r.stdout)
+
+    def test_mere_mention_of_update_sh_is_not_an_update(self):
+        self.install(*BASE_ARGS)
+        subprocess.run(["rm", "-rf", str(self.plugins / "mst.agent-launchers")], check=True)
+        script = f'echo update.sh >/dev/null; "{REPO / "install.sh"}" ' + " ".join(BASE_ARGS)
+        r = subprocess.run(["bash", "-c", script], env=self.env, capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.plugins / "mst.agent-launchers").is_dir())
+
+    def test_only_existing_adds_nothing_new(self):
+        self.install(*BASE_ARGS)
+        subprocess.run(["rm", "-rf", str(self.plugins / "omadock")], check=True)
+        r = self.install(*BASE_ARGS, "--only-existing")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse((self.plugins / "omadock").exists())
+
+    def test_manual_rerun_completes_missing_widget(self):
+        self.install(*BASE_ARGS)
+        subprocess.run(["rm", "-rf", str(self.plugins / "mst.agent-launchers")], check=True)
+        r = self.install(*BASE_ARGS)                             # z. B. nach Netzausfall beim ersten Lauf
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.plugins / "mst.agent-launchers").is_dir())
+
+    def test_copy_widget_gets_migration_hint(self):
+        (self.plugins / "mst.agent-launchers").mkdir(parents=True)  # Kopie aus dem alten Paket
+        r = self.install(*BASE_ARGS)
+        self.assertIn("omarchy plugin remove mst.agent-launchers", r.stdout)
+
+    def test_existing_memory_gets_radar_placeholder_and_index_entry(self):
+        mem = self.home / ".config" / "ai-agents"
+        (mem / "handoff").mkdir(parents=True)
+        (mem / "AGENTS.md").write_text("# Regeln\n\n- Radar: `handoff/omarchy-radar.md` lesen.\n")
+        (mem / "AI_HANDOFF.md").write_text("# Index\n\n| Datei | Thema | Status |\n|---|---|---|\n")
+        args = [a for a in BASE_ARGS if a != "--no-memory"]
+        r = self.install(*args)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((mem / "handoff" / "omarchy-radar.md").is_file())
+        self.assertIn("| `handoff/omarchy-radar.md` |", (mem / "AI_HANDOFF.md").read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

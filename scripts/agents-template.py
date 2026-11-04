@@ -25,6 +25,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 LIVE = Path.home() / ".config" / "ai-agents" / "AGENTS.md"
 TEMPLATE = REPO / "memory" / "template" / "AGENTS.md"
+# HEADER nicht aendern, auch nicht kosmetisch: install.sh vergleicht die
+# bestaetigte Vorlage per Hash der ganzen Datei; jede Aenderung meldet allen
+# Nutzern "Agentenregeln geaendert" (Review 2026-11-04).
 HEADER = ("# Gemeinsamer Kontext für lokale AI-Agenten\n\n"
           "<!-- Vorlage aus dem Polaris-Installationspaket. An den eigenen Rechner anpassen. -->\n")
 ALLGEMEIN = re.compile(r"\s*<!--\s*allgemein\s*-->\s*$")

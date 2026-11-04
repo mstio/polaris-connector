@@ -88,8 +88,8 @@ itself only via PR, and say so explicitly in the description.
 ## How a PR works (for the agent)
 
 Create a fork with a clone once. Work separately from the running
-installation: from an install bundle it usually lives in
-`~/.local/share/polaris/app`.
+installation (your clone from `install.sh`, or `~/.local/share/polaris/app`
+for older installs from the former bundle).
 
 ```bash
 gh repo fork mstio/polaris-connector --clone ~/Projects/polaris-connector

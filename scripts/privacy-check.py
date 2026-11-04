@@ -31,7 +31,8 @@ Abgeglichen wird ueber SHA-256-Fingerabdruecke bzw. im Speicher; nichts davon
 wird gespeichert.
 Treffer auf geschuetzte Inhalte nennen nur Datei und Zeile, nie den Text.
 
-Aufruf:  privacy-check.py <Ordner>      Exit 0 = sauber, 1 = Treffer
+Aufruf:  privacy-check.py <Ordner> [<Ordner> ...]   Exit 0 = sauber, 1 = Treffer
+         (mehrere Ordner: geschuetzte Ordner werden nur einmal eingelesen)
 """
 
 from __future__ import annotations
@@ -279,13 +280,18 @@ def scan(root: Path, words: list[str], fps: Protected | None = None,
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print(__doc__.strip().splitlines()[-1], file=sys.stderr)
+    if len(sys.argv) < 2:
+        print("Aufruf: privacy-check.py <Ordner> [<Ordner> ...]", file=sys.stderr)
         return 2
     protected = protected_dirs()
     words = terms(protected)
     fps = fingerprints(protected)
-    hits = scan(Path(sys.argv[1]), words, fps, exact_names(protected))
+    names = exact_names(protected)
+    roots = [Path(a) for a in sys.argv[1:]]
+    hits = []
+    for root in roots:
+        found = scan(root, words, fps, names)
+        hits += [f"{root.name}/{h}" for h in found] if len(roots) > 1 else found
     for h in hits:
         print(h)
     print(f"Privatsphaere-Pruefung: {len(words)} Begriffe, {len(protected)} geschuetzte Ordner "

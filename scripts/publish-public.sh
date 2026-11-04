@@ -35,6 +35,9 @@ done
 
 cd "$REPO"
 SHA="$(git rev-parse --verify "$REF^{commit}")"
+# Vorlagen (memlint, Skills, allgemeine Agentenregeln) im Gleichstand mit den
+# Live-Fassungen? (seit 2026-11-04, vorher in make-bundle.sh)
+"$REPO/scripts/check-sync.sh" || { echo "FEHLER: Vorlagen veraltet - nichts veroeffentlicht." >&2; exit 1; }
 [ -d "$PUBLIC_DIR/.git" ] || { echo "FEHLER: kein Spiegel unter $PUBLIC_DIR (git clone des oeffentlichen Repos)." >&2; exit 1; }
 if [ -n "$(git -C "$PUBLIC_DIR" status --porcelain)" ]; then
   echo "FEHLER: $PUBLIC_DIR hat uncommittete Aenderungen." >&2; exit 1
