@@ -152,7 +152,7 @@ Core and curator are always installed, everything else is optional; see
 
 Current extension version: see `extension/manifest.json`. What changed between
 versions: [`CHANGELOG.md`](CHANGELOG.md) (German). The module documents under
-[`docs/`](#documentation) are in English; curator internals are in German.
+[`docs/`](#documentation) and the component READMEs are in English.
 
 ## Privacy and legal notice
 
@@ -240,7 +240,7 @@ sets up all modules together and the health check knows each of them.
 | Backup and extras | [docs/backup-and-extras.md](docs/backup-and-extras.md) |
 | Developer tooling (privacy check, mirror) | [docs/developer-tooling.md](docs/developer-tooling.md) |
 | Paths, uninstalling, tests | [docs/reference.md](docs/reference.md) |
-| Curator internals (German) | [curator/README.md](curator/README.md) |
+| Curator internals | [curator/README.md](curator/README.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Changes (German) | [CHANGELOG.md](CHANGELOG.md) |
 

@@ -8,7 +8,7 @@ from conftest_helpers import FakeLlm, TempProject, fast_config, make_change
 
 from polaris_curator import pipeline, state as state_mod
 
-LONG_A = "Die Hausverwaltung uebernimmt ab Oktober die Abrechnung fuer alle Einheiten im Objekt."
+LONG_A = "Die Buchhaltung uebernimmt ab Oktober die Abrechnung fuer alle Standorte im Verbund."
 LONG_B = "Der Beirat hat die Sonderumlage fuer das Dach am Montag beschlossen und protokolliert."
 
 

@@ -288,7 +288,7 @@ class TestMerge(unittest.TestCase):
             change = make_change(
                 decisions_add=[
                     {
-                        "title": "2026-09-14 – Schkeuditz: Koordination",
+                        "title": "2026-09-14 – Nordstadt: Koordination",
                         "decision": "X",
                         "rationale": "Y",
                         "date": "2026-09-14",
@@ -297,7 +297,7 @@ class TestMerge(unittest.TestCase):
             )
             merge.apply_change_object(project, change, "<!-- prov -->")
             text = layout.decisions_path(project).read_text(encoding="utf-8")
-            self.assertIn("## 2026-09-14 – Schkeuditz: Koordination", text)
+            self.assertIn("## 2026-09-14 – Nordstadt: Koordination", text)
             self.assertNotIn("2026-09-14 – 2026-09-14", text)
 
     def test_decisions_add_shows_scope_and_unvalidated_state(self):

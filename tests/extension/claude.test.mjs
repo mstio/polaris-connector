@@ -45,7 +45,7 @@ function env({ path = `/chat/${C1}`, conversations = {}, projects = { [`claude-p
   const respond = (url) => {
     const m = url.match(/chat_conversations\/([0-9a-f-]{36})/);
     if (m && conversations[m[1]]) return { ok: true, status: 200, json: async () => structuredClone(conversations[m[1]]) };
-    if (/\/projects\//.test(url)) return { ok: true, status: 200, json: async () => ({ name: 'COO' }) };
+    if (/\/projects\//.test(url)) return { ok: true, status: 200, json: async () => ({ name: 'Leitung' }) };
     return { ok: false, status: 404, json: async () => ({}) };
   };
   const sandbox = {

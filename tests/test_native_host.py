@@ -85,7 +85,7 @@ class TestProjectMapping(unittest.TestCase):
             cfg = config.load_config()
             cfg.suggested_folder_for_claude = "MusterFirma"
             config.save_config(cfg)
-            event = make_event(project_id="claude-p-x", project_name="COO")
+            event = make_event(project_id="claude-p-x", project_name="Leitung")
             event["source"] = "claude"
             reply = native_host.handle({"id": 1, "type": "export-events", "events": [event]})
             self.assertEqual(reply["counts"]["pending"], 1)
@@ -97,7 +97,7 @@ class TestProjectMapping(unittest.TestCase):
             self.assertEqual(listing["pending"], 1)
 
             mapped = native_host.handle({"id": 3, "type": "map-project", "projectId": "claude-p-x",
-                                         "projectName": "COO", "folder": "MusterFirma"})
+                                         "projectName": "Leitung", "folder": "MusterFirma"})
             self.assertTrue(mapped["ok"])
             self.assertEqual(mapped["counts"]["processed"], 1)
             msg = root / "MusterFirma" / "raw" / "claude" / "messages" / f"{event['message']['id']}.json"

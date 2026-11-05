@@ -1,144 +1,158 @@
 # Polaris Curator v0.2
 
-Kondensiert neue ChatGPT-Messages (aus der Polaris Bridge) sowie neue
-Projektdokumente (`inbox/mail`, `inbox/documents`, `inbox/notes`) zu
-kuratiertem, belastbarem Projektwissen: `knowledge.md`, `decisions.md`,
-`open-loops.md`. Keine RAG, keine Embeddings, keine Vector-DB - reine
-Extraktion, Redaktion und gezieltes Merging. Laeuft projektuebergreifend
-(Firma, Kunden, private Vorhaben) - die
-Klassifikations-/Qualitaetslogik unten ist bewusst projektneutral.
+Condenses new ChatGPT messages (from the Polaris bridge) and new project
+documents (`inbox/mail`, `inbox/documents`, `inbox/notes`) into curated,
+reliable project knowledge: `knowledge.md`, `decisions.md`,
+`open-loops.md`. No RAG, no embeddings, no vector DB - pure extraction,
+editing and targeted merging. Works across projects (company, clients,
+private ventures) - the classification/quality logic below is deliberately
+project-neutral.
 
-**v0.2-Aenderung (2026-09-14)**: Nach einem Qualitaets-Review eines
-echten Testlaufs (siehe "Qualitaets-Review v0.1 -> v0.2" unten) wurde die
-Extraktion von einem flachen "is_assumption"-Flag auf eine erzwungene
-5-Kategorien-Klassifikation pro Eintrag umgestellt (Fakt /
-Stakeholder-Aussage / Hypothese / Systemische Implikation /
-Entscheidung), inkl. Scope, Evidenzgrad, Konfidenz, Wirkungsketten,
-Key-Person-Erkennung und einer verpflichtenden Selbstkritik-Checkliste
-vor jeder Antwort. Das Modell (`gpt-5.6-luna`) und die
-Single-Call-Architektur wurden dabei bewusst NICHT geaendert - siehe
-"Modellstrategie" unten, warum.
+**v0.2 change (2026-09-14)**: After a quality review of a real test run
+(see "Quality logic (v0.2)" below), extraction was switched from a
+flat "is_assumption" flag to an enforced 5-category classification per
+entry (fact / stakeholder statement / hypothesis / systemic implication /
+decision), including scope, evidence strength, confidence, causal chains,
+key-person detection and a mandatory self-review checklist before every
+answer. The model and the single-call architecture were deliberately NOT
+changed in v0.2; the main model was switched later (2026-09-24, see "Model
+strategy").
 
-## Architektur
+## Architecture
 
 ```
-raw/chatgpt/messages/*.json  ---\
-                                  +--> Tagesbatches (Projekt + lokaler Tag)
-inbox/{mail,documents,notes} ---/       |
-                                         v
-                                  Budget-Pruefung (max_batches_per_run, ...)
+raw/{chatgpt,claude}/messages/*.json --\
+                                         +--> daily batches (project + local day)
+inbox/{mail,documents,notes} ----------/       |
+                                                v
+                                  budget check (max_batches_per_run, ...)
                                          |
                                          v
-                                  Prompt (Batch/Dokument + aktuell
-                                  kuratiertes Wissen als Kontext)
+                                  prompt (batch/document + current
+                                  curated knowledge as context)
                                          |
                                          v
-                          codex exec --output-schema (strukturiertes JSON)
+                          codex exec --output-schema (structured JSON)
                                          |
                                          v
-                          lokale Schema-Validierung (change_schema.py)
+                          local schema validation (change_schema.py)
                                          |
                                          v
-                    Selbstkritik-Gate (change_schema.failed_self_review_checks)
+                    self-review gate (change_schema.failed_self_review_checks)
                                          |
                                          v
-                    Merge-Engine (merge.py) -> knowledge.md / decisions.md /
-                                                open-loops.md (atomar)
+                    output check (guard.py, quarantine on suspicion)
                                          |
                                          v
-                          curator-state.json NUR nach erfolgreichem Merge
+                    merge engine (merge.py) -> knowledge.md / decisions.md /
+                                                open-loops.md (atomic)
+                                         |
+                                         v
+                          curator-state.json ONLY after a successful merge
 ```
 
-Extraktion und Kuratierung laufen bewusst weiterhin in EINEM Schritt/
-einem `codex exec`-Aufruf (kein separater Extraktions- vs.
-Synthese-Call) - siehe "Modellstrategie" unten, warum das (noch) so ist.
-Was sich in v0.2 geaendert hat: Das Modell muss dabei eine strukturierte
-Zwischenrepraesentation pro Eintrag liefern (Klassifikation, Scope,
-Evidenzgrad, Konfidenz, ...), aus der `merge.py` erst die finale
-Markdown-Formulierung baut - die analytische Bewertung ist damit von der
-Formulierung getrennt (siehe "Qualitaetslogik" unten), auch ohne eigenen
-LLM-Call dafuer.
+Extraction and curation still deliberately run in ONE step/one
+`codex exec` call (no separate extraction vs. synthesis call) - see
+"Model strategy" below for why this is (still) the case. What changed in
+v0.2: the model must deliver a structured intermediate representation per
+entry (classification, scope, evidence strength, confidence, ...), from
+which `merge.py` only then builds the final Markdown wording - the
+analytical assessment is thus separated from the wording (see "Quality
+logic" below), even without a dedicated LLM call for it.
 
-Module (`curator/polaris_curator/`):
-- `config.py` - globale + projektspezifische Konfiguration, Modell-IDs
-- `chatgpt_source.py` - liest raw/chatgpt/messages/, liefert nur neue
-- `documents_source.py` - inbox-Scan, Hash-basierte Aenderungserkennung,
-  Extraktion (.eml inkl. Anhaenge/.pdf/.docx/.xlsx/.pptx/.csv/.md/.txt),
-  Ablage der Mail-Anhaenge
-- `office_extract.py` - DOCX/XLSX/PPTX-Text nur mit der Standardbibliothek
-- `batching.py` - Tagesbatches, Sub-Batches bei Budget-Ueberschreitung
-- `prompts.py` - Prompt-Bau inkl. Prompt-Injection-Schutz
-- `llm.py` - `codex exec`-Aufruf, Fallback-Modell, Fehlerklassifizierung
-- `change_schema.py` - JSON-Schema (fuer `--output-schema`) + Validator
-- `merge.py` - gezieltes Merging in die drei Markdown-Dateien
+Modules (`curator/polaris_curator/`):
+- `config.py` - global + project-specific configuration, model IDs
+- `chatgpt_source.py` - reads raw/chatgpt/messages/ and raw/claude/messages/, returns only new ones
+- `documents_source.py` - inbox scan, hash-based change detection,
+  extraction (.eml incl. attachments/.pdf/.docx/.xlsx/.pptx/.csv/.md/.txt),
+  storing mail attachments
+- `office_extract.py` - DOCX/XLSX/PPTX text using only the standard library
+- `batching.py` - daily batches, sub-batches when the budget is exceeded
+- `prompts.py` - prompt building incl. prompt-injection protection
+- `llm.py` - `codex exec` call, fallback model, error classification
+- `change_schema.py` - JSON schema (for `--output-schema`) + validator
+- `merge.py` - targeted merging into the three Markdown files
 - `state.py` - `curator-state.json`
-- `pipeline.py` - Orchestrierung, Budget, Locking
-- `reclassify.py` - einmalige Neueinstufung nach Regel 2a
-- `integrity.py` - Projekttrennung der Rohdaten pruefen (Sperre vor jedem Lauf, Health Check)
-- `retract.py` - `retract`: kuratierte Eintraege aus bestimmten Nachrichten zuruecknehmen
-- `transfer.py` - `export`: kuratiertes Wissen als ZIP fuer andere Anbieter
+- `pipeline.py` - orchestration, budget, locking
+- `reclassify.py` - one-off reclassification under rule 2a
+- `integrity.py` - checks project separation of the raw data (lock before every run, health check)
+- `retract.py` - `retract`: withdraw curated entries derived from specific messages
+- `transfer.py` - `export`: curated knowledge as a ZIP for other providers
+- `context.py` - curated context for the prompt (full text or index + relevant entries)
+- `compact.py` - compaction of `knowledge.md`; `loops_review.py` - closes open loops that are done
+- `review.py` - optional independent review by Claude (`reviewer_model`)
+- `guard.py` - output check and quarantine; `sandbox.py` - bubblewrap sealing of model CLIs
+- `journal.py` - run journal; `locking.py` - per-project lock; `storage.py`, `layout.py` - paths and atomic writes
+- `ids.py` - entry IDs; `docs_index.py` - `dokumente-index.md`
+- `health.py`, `systemhealth.py`, `healthagent.py`, `status_cache.py` - monitoring, health check, "ask agent"
+- `usage.py` - local usage counter; `i18n.py` - widget/health check texts (de/en); `logging_setup.py`
 - `cli.py` - `polaris-curator status/status-all/run/run-all/backfill/pending/export/...`
 
-## Ausgabepruefung und Quarantaene
+## Output check and quarantine
 
-Chats, Mails und Anhaenge sind fremder Inhalt; eine darin versteckte
-Anweisung kann das Modell dazu bringen, sie ins Projektwissen zu schreiben,
-das spaeter Agenten und Chat-Projekte als Kontext lesen. Vor dem Schreiben
-prueft `guard.py` jede Modellantwort auf geheimnisaehnliche Zeichenketten
-(Schluessel, Tokens, der lokale Koeder `~/.config/polaris/canary`) und auf
-Anweisungen an eine KI oder Shell-Befehle. Bei einem Treffer wird nichts
-geschrieben; die Antwort liegt lokal (nie auf dem Laufwerk) unter
-`~/.local/state/polaris/quarantine/`, der Health Check meldet sie.
+Chats, mails and attachments are third-party content; an instruction hidden
+in them can make the model write it into the project knowledge, which agents
+and chat projects later read as context. Before writing, `guard.py` checks
+every model answer for secret-like strings (keys, tokens, the local canary
+`~/.config/polaris/canary`) and for instructions to an AI or shell commands.
+On a hit nothing is written; the answer is kept locally (never on the drive)
+under `~/.local/state/polaris/quarantine/`, and the health check reports it.
 
     polaris-curator quarantine list          # angehaltene Antworten
     polaris-curator quarantine show <id>     # Befund (volle Antwort mit --full)
     polaris-curator quarantine release <id>  # nach Sichtung doch schreiben
     polaris-curator quarantine drop <id>     # verwerfen
 
-Vor der Pruefung wird der Text normalisiert (Breit-/Sonderformen,
-unsichtbare Zeichen, aehnlich aussehende Buchstaben); unsichtbare
-Formatzeichen werden auch nie geschrieben. Dieselbe Pruefung gilt fuer die
-Plaene von Verdichtung, Neu-Einordnung und Aufraeumen der offenen Punkte
-(angehalten, nicht freigebbar; der naechste Lauf plant neu) und fuer
-Betreff, Absender und Dateinamen im Dokumentindex. Freigegebene Antworten
-behalten ihre Herkunft (per `retract` zuruecknehmbar). Zusaetzlich verbietet
-der Prompt, an Software gerichtete Aufforderungen, Befehle oder Zugangsdaten
-zu uebernehmen, und erfasst angebliche Aenderungen an Zahlungen,
-Bankverbindungen oder Zugaengen von aussen als "Verifizieren"-Punkt.
+(Held answers; finding, full answer with `--full`; write after review
+anyway; discard.)
 
-Die Pruefung erkennt typische Muster, keine geschickt verschleierten; die
-eigentlichen Grenzen sind die Sandbox der Modell-CLI und die festen
-Ausgabefelder. Der Koeder funktioniert nur, solange `~/.config/polaris`
-nicht per `command_sandbox_ro` freigegeben wird.
+Before the check the text is normalised (full-width/special forms, invisible
+characters, look-alike letters); invisible format characters are also never
+written. The same check applies to the plans of compaction,
+reclassification and open-loop cleanup (held, not releasable; the next run
+plans again) and to subject, sender and file names in the document index.
+Released answers keep their provenance (can be withdrawn with `retract`).
+In addition, the prompt forbids adopting requests addressed to software,
+commands or credentials, and records alleged outside changes to payments,
+bank details or access as a "Verifizieren" (verify) item.
 
-## Konfiguration
+The check catches typical patterns, not cleverly obfuscated ones; the real
+boundaries are the model CLI's sandbox and the fixed output fields. The
+canary only works as long as `~/.config/polaris` is not opened up via
+`command_sandbox_ro`.
 
-Global: `~/.config/polaris/curator.yaml` (wird beim ersten Lauf mit
-Standardwerten angelegt). Projektspezifischer Override (optional):
-`<Project>/.polaris/curator-config.yaml` (gleiches Format, nur die
-gesetzten Felder ueberschreiben den globalen Wert). Erlaubt sind dort nur
-`batching`, `budget`, `context`, `monitoring`, `compaction` und
-`attachments`. Laufzeit, Befehl (`runtime: command`), Anbieter und Modelle
-kommen ausschliesslich aus der lokalen `curator.yaml`: Projektordner liegen
-oft auf einem Cloud-Laufwerk, in das auch andere schreiben koennen. Andere
-Schluessel werden ignoriert und im Health Check gemeldet.
+## Configuration
 
-Sprache (seit 2026-11-04): `language: de` oder `language: en` in der globalen
-`curator.yaml` stellt Widget und Health Check um. Fehlt die Zeile, gilt `de`
-(bestehende Installationen bleiben deutsch); neue Installationen setzt
-`install.sh --language` bzw. die Systemsprache. Die Feldbezeichnungen in
-`knowledge.md` usw. bleiben vorerst deutsch.
+Global: `~/.config/polaris/curator.yaml` (created with default values on the
+first run). Project-specific override (optional):
+`<project>/.polaris/curator-config.yaml` (same format, only the fields set
+there override the global value). Only `batching`, `budget`, `context`,
+`monitoring`, `compaction` and `attachments` are allowed there. Runtime,
+command (`runtime: command`), provider and models come exclusively from the
+local `curator.yaml`: project folders often live on a cloud drive that others
+can write to as well. Other keys are ignored and reported in the health
+check.
+
+Language (since 2026-11-04): `language: de` or `language: en` in the global
+`curator.yaml` switches the widget and health check. Without the line, `de`
+applies (existing installations stay German); new installations set it via
+`install.sh --language` or the system language. The field labels in
+`knowledge.md` etc. stay German for now.
+
+Built-in defaults (`config.py`, used for every key missing from
+`curator.yaml`):
 
 ```yaml
 provider: openai
 runtime: codex
-model: gpt-5.6-luna        # kostenguenstiges Modell, siehe Hinweis unten
+model: gpt-5.6-luna        # low-cost model, see note below
 fallback_model: gpt-5.6-sol
 permit_more_expensive_fallback: false
 llm_timeout_seconds: 180
+reasoning_effort: null     # CLI default
 batching:
-  min_messages_for_early_run: 10   # aktuell ohne Wirkung, siehe unten
-  min_chars_for_early_run: 8000    # aktuell ohne Wirkung, siehe unten
+  min_messages_for_early_run: 10   # currently without effect, see below
+  min_chars_for_early_run: 8000    # currently without effect, see below
 budget:
   max_batches_per_run: 3
   max_llm_calls_per_run: 3
@@ -147,660 +161,671 @@ budget:
   max_total_input_chars_per_run: 120000
 context:
   max_curated_context_chars: 50000
-  full_context_chars: 80000     # darueber: Verzeichnis + Volltext des Relevanten
-  index_cap: 0.25               # Verzeichnis hoechstens 25 % davon (0 = alle Eintraege)
+  full_context_chars: 80000     # above this: index + full text of what is relevant
+  index_cap: 0.25               # index at most 25 % of that (0 = all entries)
 attachments:
-  min_image_bytes: 300000       # kleinere Bilder = Signatur/Logo, ignoriert
+  min_image_bytes: 300000       # smaller images = signature/logo, ignored
   max_images_per_document: 5
   max_chars_per_attachment: 20000
 ```
 
-**Modell-IDs**: `gpt-5.6-luna` wurde am 2026-09-12 aus
-`~/.codex/models_cache.json` als "Fast and affordable agentic coding
-model" ermittelt - passend fuer eine reine Extraktions-/Merge-Aufgabe.
-`gpt-5.6-sol` war zu dem Zeitpunkt das globale Codex-Standardmodell des
-Nutzers und dient hier als Fallback. Modellkataloge veralten - bei Bedarf
-in `~/.config/polaris/curator.yaml` anpassen, ohne Code zu aendern.
+The template that `install.sh` writes for Codex
+(`curator.example-codex.yaml`) deliberately overrides several of these:
+`model: gpt-6-astra`, `reasoning_effort: medium`, `llm_timeout_seconds: 1200`,
+`max_input_chars_per_batch: 100000`, `max_total_input_chars_per_run: 250000`,
+`max_curated_context_chars: 200000`, plus `language`,
+`monitoring.chat_sources`, `claude_fallback_model` and `reviewer_model`
+(both `null` = off).
 
-**`min_messages_for_early_run` / `min_chars_for_early_run`**: In der
-Aufgabenstellung fuer ein moegliches haeufigeres Aufruf-Intervall gedacht.
-Da v0.1 nur ueber manuelle Aufrufe und den taeglichen systemd-Timer
-laeuft - beides zaehlt laut Aufgabenstellung bereits als gueltiger Trigger
-zum Verarbeiten auch kleiner Batches - haben diese Schwellenwerte aktuell
-keine Wirkung; jeder Lauf verarbeitet alles, was ins Budget passt. Die
-Konfiguration ist vorbereitet, falls spaeter ein haeufigerer Modus
-ergaenzt wird.
+**Model IDs**: `gpt-5.6-luna` was identified on 2026-09-12 from
+`~/.codex/models_cache.json` as "Fast and affordable agentic coding
+model" - a good fit for a pure extraction/merge task - and is still the
+built-in default. `gpt-5.6-sol` was the user's global Codex default model at
+that time and serves as the fallback. Since 2026-09-24 the Codex template
+uses `gpt-6-astra` (see "Model strategy"). Model catalogues go stale - adjust in `~/.config/polaris/curator.yaml`
+as needed, without changing code.
 
-**Runtime `claude` (seit 2026-10-07)**: Auf Rechnern ohne Codex kuratiert
-die Claude-Code-CLI (`runtime: claude`, `model: opus`, `fallback_model:
-sonnet`; Vorlage `curator.example-claude.yaml`). Gleicher abgeschotteter
-Aufruf wie beim Ersatzmodell. Bilder aus Mail-Anhaengen entfallen dabei
-(Warnung im Log), der Text wird kuratiert. `reviewer_model` dort aus lassen
-- Claude prueft sonst sich selbst.
+**`min_messages_for_early_run` / `min_chars_for_early_run`**: Intended in
+the task specification for a possible more frequent invocation interval.
+Since v0.1 only runs via manual calls and the daily systemd timer - both of
+which, per the task specification, already count as a valid trigger for
+processing even small batches - these thresholds currently have no effect;
+every run processes everything that fits into the budget. The configuration
+is prepared in case a more frequent mode is added later.
 
-**Runtime `command` (seit 2026-10-07, anbieterneutral)**: beliebige
-Agenten-CLI als Argumentliste (`command`), Platzhalter `{model}`,
-`{prompt_file}`, `{schema_file}`, `{schema_json}`; ohne `{prompt_file}` kommt
-der Prompt ueber stdin (im Dateimodus ist stdin geschlossen). Fehlt ein
-Schema-Platzhalter, haengt der Curator das JSON-Schema an den Prompt an. Die
-Antwort wird aus reinem JSON, einer JSON-Huelle (`command_output_key` oder
-bekannte Felder wie `response`/`result`) oder dem JSON-Block in Text gelesen
-und wie immer vom Curator selbst geprueft. Vorlage mit getestetem Beispiel
-(Gemini/Antigravity im Planmodus) und ungetesteten Kandidaten:
-`curator.example-command.yaml`. Sicherheit: Die CLI laeuft in einem leeren
-Arbeitsordner; Shell- und Schreibwerkzeuge ueber ihre eigenen Flags
-abschalten - die Chats sind fremder Inhalt. Fehlermeldungen enthalten nur
-kurze Fehlerzeilen, nie den Prompt. Bilder aus Mail-Anhaengen entfallen.
+**Runtime `claude` (since 2026-10-07)**: On machines without Codex, the
+Claude Code CLI curates (`runtime: claude`, `model: opus`, `fallback_model:
+sonnet`; template `curator.example-claude.yaml`). Same sealed-off call as
+for the fallback model. Images from mail attachments are dropped (warning in
+the log); the text is curated. Leave `reviewer_model` off there
+- otherwise Claude reviews itself.
 
-**Einrichtung pruefen**: `polaris-curator llm-check` zeigt Runtime, Modell
-und ob die benoetigten CLIs (Runtime, ggf. Claude als Ersatz/Pruefer) im
-`PATH` liegen. `--call` macht zusaetzlich einen winzigen echten Aufruf des
-Hauptmodells ohne Ersatzstufen (Anmeldung, Modellname; bei Codex ca. 20k
-Token Vorlauf). Der Health Check meldet eine fehlende Runtime-CLI als
-Fehler („Curator › Modell“).
+**Runtime `command` (since 2026-10-07, provider-neutral)**: any agent CLI as
+an argument list (`command`), placeholders `{model}`, `{prompt_file}`,
+`{schema_file}`, `{schema_json}`; without `{prompt_file}` the prompt comes
+via stdin (in file mode stdin is closed). If a schema placeholder is
+missing, the curator appends the JSON schema to the prompt. The answer is
+read from plain JSON, a JSON wrapper (`command_output_key` or known fields
+such as `response`/`result`) or the JSON block in text, and as always checked
+by the curator itself. Template with a tested example (Gemini/Antigravity in
+plan mode) and untested candidates: `curator.example-command.yaml`.
+Security: the CLI runs in an empty working directory; switch off shell and
+write tools via its own flags - the chats are third-party content. Error
+messages contain only short error lines, never the prompt. Images from mail
+attachments are dropped.
 
-## Erster Lauf / Initialisierung
+**Checking the setup**: `polaris-curator llm-check` shows runtime, model and
+whether the required CLIs (runtime, possibly Claude as fallback/reviewer) are
+on the `PATH`. `--call` additionally makes a tiny real call to the main model
+without fallback stages (login, model name; with Codex about 20k tokens of
+overhead). The health check reports a missing runtime CLI as an error
+("Curator › Model"; German UI: „Curator › Modell“).
 
-Der erste Lauf pro Projekt verarbeitet den kompletten, zu diesem
-Zeitpunkt vorhandenen ChatGPT-Bestand einmalig (siehe Aufgabenstellung
-Abschnitt 4). Das ist normal und gewollt. Danach werden nur noch neue
-Messages verarbeitet.
+## First run / initialisation
+
+The first run per project processes the complete ChatGPT stock present at
+that point once (see task specification section 4). This is normal and
+intended. After that only new messages are processed.
 
 ## CLI
 
 ```bash
-polaris-curator status <Projekt>       # Ueberblick: neue Quellen, Budget
-polaris-curator status-all             # Ueberblick ueber alle bekannten Projekte
-polaris-curator run <Projekt>          # echten Lauf ausfuehren
-polaris-curator run <Projekt> --dry-run
-polaris-curator run-all                # alle bekannten Projekte (Bridge-Mapping)
-polaris-curator backfill <Projekt>     # historischen Bestand ERNEUT verarbeiten
-polaris-curator pending <Projekt>      # jenseits des Budgets wartende Einheiten
-polaris-curator health [--json]        # Health-Check der eigenen Bausteine
-polaris-curator compact <Projekt>      # knowledge.md verdichten (--dry-run zuerst)
-polaris-curator index-documents <Projekt>|--all   # dokumente-index.md neu aufbauen
-polaris-curator export <Projekt>|--all [-o ZIP]   # kuratiertes Wissen fuer anderen Anbieter
-polaris-curator reclassify <Projekt> [--apply]    # KI-Antworten nach Regel 2a neu einstufen
-polaris-curator retract <Projekt> <IDs>|--from-dir D [--apply [--rebuild]]  # Wissen aus Nachrichten zuruecknehmen
+polaris-curator status <project>       # overview: new sources, budget
+polaris-curator status-all [--no-cache]  # overview of all known projects
+polaris-curator run <project>          # perform a real run
+polaris-curator run <project> --dry-run
+polaris-curator run-all                # all known projects (bridge mapping)
+polaris-curator backfill <project>     # reprocess the historical stock AGAIN
+polaris-curator pending <project>      # units waiting beyond the budget
+polaris-curator health [--json] [--all] [--ask <id>]  # health check; --ask opens the default agent on one finding
+polaris-curator llm-check [--call]     # check runtime, CLIs, login (see "Configuration")
+polaris-curator compact <project> [--dry-run] [--show-plan]  # compact knowledge.md (--dry-run first)
+polaris-curator review-loops <project> [--dry-run]  # check open loops against the knowledge, close what is done
+polaris-curator index-documents <project>|--all   # rebuild dokumente-index.md
+polaris-curator export <project>|--all [-o ZIP] [--with-archive] [--json]  # curated knowledge for another provider
+polaris-curator reclassify <project> [--apply]    # reclassify AI answers under rule 2a
+polaris-curator retract <project> <IDs>|--ids-file F|--from-dir D [--apply [--rebuild]] [--force] [--json]  # withdraw knowledge derived from messages
+polaris-curator journal <project> [--discard]     # show (or discard) the run journal
+polaris-curator quarantine list|show|release|drop [<id>] [--full]  # output check quarantine
 ```
 
-Fuer lokale Oberflaechen und Automatisierung liefern `status`, `status-all`,
-`run` und `run-all` mit `--json` einen stabilen, maschinenlesbaren Vertrag.
-Das Omarchy-Widget unter `omarchy-plugin/mst.polaris-curator/` verwendet
-ausschliesslich diese JSON-Ausgaben und startet damit dieselbe Pipeline wie
-der taegliche Timer: neue ChatGPT-Nachrichten und neue Dateien in
-`inbox/{documents,mail,notes}` werden gemeinsam kuratiert.
+For local UIs and automation, `status`, `status-all`, `run` and `run-all`
+provide a stable, machine-readable contract with `--json`. The Omarchy
+widget under `omarchy-plugin/mst.polaris-curator/` uses only these JSON
+outputs and thereby starts the same pipeline as the daily timer: new
+ChatGPT messages and new files in `inbox/{documents,mail,notes}` are curated
+together.
 
-`<Projekt>` ist entweder der Ordnername (z.B. `Firma`, muss unter
-einem der Bridge-`project_roots` gemappt sein) oder ein direkter Pfad.
+`<project>` is either the folder name (e.g. `Company`, must be mapped under
+one of the bridge `project_roots`) or a direct path.
 
-**`backfill` mit Vorsicht nutzen**: verarbeitet Messages unabhaengig vom
-bisherigen State erneut - kann zu redundanten Eintraegen in `knowledge.md`
-fuehren, wenn diese bereits kuratiert wurden. Nur bewusst einsetzen, z.B.
-nach einem gewollten Reset der kuratierten Dateien.
+**Use `backfill` with care**: reprocesses messages regardless of the previous
+state - can lead to redundant entries in `knowledge.md` if they were already
+curated. Use only deliberately, e.g. after an intentional reset of the
+curated files.
 
-## Nutzungszähler (seit 2026-11-05)
+## Usage counter (since 2026-11-05)
 
-`polaris_curator/usage.py` zählt lokal in `~/.local/state/polaris/usage.json`,
-wie oft jeder CLI-Befehl (`cli:<befehl>`) und die Funktionen `compact`,
-`loops_review` und `reviewer` laufen: nur Name, Anzahl, erstes und letztes
-Datum, nie Inhalte, Projekte oder Pfade. Zweck: ungenutzten Code mit Beleg
-entfernen. Tests schalten ihn mit `POLARIS_USAGE_OFF=1` ab.
+`polaris_curator/usage.py` counts locally in `~/.local/state/polaris/usage.json`
+how often each CLI command (`cli:<command>`) and the functions `compact`,
+`loops_review` and `reviewer` run: only name, count, first and last date,
+never contents, projects or paths. Purpose: remove unused code with evidence.
+Tests switch it off with `POLARIS_USAGE_OFF=1`.
 
-## Health-Check und Überwachung (seit 2026-09-25)
+## Health check and monitoring (since 2026-09-25)
 
-`polaris-curator health [--json]` prüft die selbst gebauten Bausteine
-(ChatGPT-Archivierung, Firefox-Erweiterung inkl. Berechtigung für
-chatgpt.com, Native Host, Curator-Timer, Modell-CLI, omarchy-backup, Projektordner)
-und klein ein paar Systemwerte (Platten, fehlgeschlagene Units, Akku). Das
-Omarchy-Widget (`omarchy-plugin/mst.polaris-curator`, Anzeigename „Health
-Check“) zeigt das als Ampel. Nur Zustandsdateien und Metadaten, keine teuren
-Prüfungen. Optionale Bausteine (seit 2026-10-07): Ist omarchy-backup nicht
-installiert bzw. `~/.config/ai-agents` nicht vorhanden, steht dort „nicht
-eingerichtet (optional)“ statt eines Fehlers; installiertes omarchy-backup
-ohne Snapshot ist eine Warnung.
+`polaris-curator health [--json]` checks Polaris' own components (capture:
+ChatGPT/Claude archiving, bridge, chat-source configuration, Firefox
+extension incl. site permissions, native host; project separation; curator:
+timer, curation steps, last curation, model CLI, widget; storage & backup:
+project folder, omarchy-backup, backup target, repos; machine memory;
+security) and, briefly, a few system values (disks, failed units, battery,
+pending reboot, btrfs disk errors, crashes). The Omarchy widget
+(`omarchy-plugin/mst.polaris-curator`, display name "Polaris") shows this as
+a traffic light in its Health Check section; "Ask agent" (`health --ask`)
+hands a finding to the default agent, which proposes a fix and changes
+nothing without consent. Only state files and metadata, no expensive checks.
+Optional components (since 2026-10-07): if omarchy-backup is not installed
+or `~/.config/ai-agents` does not exist, the line shows "not set up
+(optional)" (German UI: „nicht eingerichtet (optional)“) instead of an error;
+an installed omarchy-backup without a snapshot is a warning.
 
-Stille Ausfälle (`health.py`): kommt projektübergreifend länger als
-`monitoring.max_days_without_chatgpt` (Default 3) keine ChatGPT-Nachricht an,
-oder bleiben Dateien in der Bridge-Inbox liegen, warnt `status-all`/`run-all`;
-der Timer-Lauf schickt höchstens eine Desktop-Benachrichtigung pro Tag und
-Befund. `monitoring.chat_sources` in `~/.config/polaris/curator.yaml` enthält
-die tatsächlich überwachten Browser-Chatquellen: `[chatgpt, claude]` (Standard),
-`[chatgpt]`, `[claude]` oder `[]` (keine Browser-Chats). Nur für ausgewählte
-Quellen prüft der Health Check Archivierung und Firefox-Berechtigungen; ohne
-Browser-Chats prüft er weder Erweiterung noch Native Host. Eine Claude-Nachricht
-deaktiviert die ChatGPT-Prüfung nicht automatisch. Steht `claude` ausdrücklich in
-der Liste, ist „noch nie eine Claude-Nachricht“ bzw. fehlender Zugriff auf
-claude.ai rot; ohne `chat_sources`-Angabe (ältere Konfigurationen) bleibt Claude
-nachsichtig. Schreibweise ist egal; unbekannte Einträge werden ignoriert und als
-Konfigurationsfehler gemeldet. Mit
-`max_days_without_chatgpt: 0` lässt sich nur die ChatGPT-Zeitprüfung aussetzen.
-Die Wahl der Chatquellen ist unabhängig von `runtime: codex|claude|command`:
-Wer z. B. Grok oder ein lokales Modell als Curator-Runtime nutzt, kann `[]`
-setzen und Dokumente weiterhin über die Inbox kuratieren. Grok-Chats werden
-ohne eigenen Erfassungsadapter nicht archiviert.
+Silent failures (`health.py`): if no ChatGPT message arrives across all
+projects for longer than `monitoring.max_days_without_chatgpt` (default 3;
+Claude: `max_days_without_claude`, default 7),
+or files remain in the bridge inbox, `status-all`/`run-all` warns; the timer
+run sends at most one desktop notification per day and finding.
+`monitoring.chat_sources` in `~/.config/polaris/curator.yaml` contains the
+browser chat sources actually monitored: `[chatgpt, claude]` (default),
+`[chatgpt]`, `[claude]` or `[]` (no browser chats). The health check checks
+archiving and Firefox permissions only for selected sources; without browser
+chats it checks neither the extension nor the native host. A Claude message
+does not automatically disable the ChatGPT check. If `claude` is explicitly
+in the list, "never a Claude message" or missing access to claude.ai is red;
+without a `chat_sources` entry (older configurations) Claude stays lenient.
+Case does not matter; unknown entries are ignored and reported as a
+configuration error. With
+`max_days_without_chatgpt: 0` only the ChatGPT time check can be suspended.
+The choice of chat sources is independent of `runtime: codex|claude|command`:
+anyone who uses e.g. Grok or a local model as the curator runtime can set
+`[]` and keep curating documents via the inbox. Grok chats are not archived
+without a dedicated capture adapter.
 
-## Projektwissens-Transfer zwischen Anbietern (seit 2026-09-25)
+## Project knowledge transfer between providers (since 2026-09-25)
 
 ```bash
-polaris-curator export Firma          # ~/Downloads/polaris-projektwissen-Firma-<Zeit>.zip
-polaris-curator export --all -o /pfad.zip  # alle bekannten Projekte in einem ZIP
-polaris-curator export Firma --with-archive --json
+polaris-curator export Company        # ~/Downloads/polaris-projektwissen-Company-<time>.zip
+polaris-curator export --all -o /path.zip  # all known projects in one ZIP
+polaris-curator export Company --with-archive --json
 ```
 
-Rueckweg des kuratierten Wissens: Was aus ChatGPT, Claude oder Dokumenten
-kuratiert wurde, soll jedem Anbieter (und anderen Agenten) als Projektkontext
-zur Verfuegung stehen, ohne dass das Wissen einem Anbieter gehoert. Kanonisch
-bleiben die Markdown-Dateien im Projektordner; `export` packt davon eine
-Momentaufnahme: `knowledge.md`, `decisions.md`, `open-loops.md`,
-`dokumente-index.md` (mit `--with-archive` auch `knowledge-archiv.md`)
-unveraendert inkl. `polaris-source`-Provenance, dazu ein erzeugtes
-`LIESMICH.md` (Lesehilfe, Herkunftszaehlung pro Datei). **Nicht** enthalten:
-`raw/` (Rohchats), `inbox/`, Originaldokumente, `.polaris/`. ZIP mit Rechten
-0600, atomar geschrieben.
+The return path for curated knowledge: what was curated from ChatGPT, Claude
+or documents should be available to every provider (and other agents) as
+project context, without the knowledge belonging to any one provider. The
+Markdown files in the project folder remain canonical; `export` packs a
+snapshot of them: `knowledge.md`, `decisions.md`, `open-loops.md`,
+`dokumente-index.md` (with `--with-archive` also `knowledge-archiv.md`)
+unchanged incl. `polaris-source` provenance, plus a generated
+`LIESMICH.md` (reading guide, provenance count per file). **Not** included:
+`raw/` (raw chats), `inbox/`, original documents, `.polaris/`. ZIP with
+permissions 0600, written atomically.
 
-Bewusst getrennt vom Maschinengedaechtnis (`~/.config/ai-agents`): Der Curator
-schreibt nie dorthin, und Maschinenzustand gehoert nicht in einen
-Projektkontext - deshalb enthielt das Maschinengedaechtnis-ZIP kein
-Projektwissen.
+Deliberately kept separate from the machine memory (`~/.config/ai-agents`):
+the curator never writes there, and machine state does not belong in a
+project context - which is why the machine-memory ZIP contained no project
+knowledge.
 
-## Nachkuratierung der Einstufung (seit 2026-09-25)
+## Re-curating the classification (since 2026-09-25)
 
 ```bash
-polaris-curator reclassify Firma           # Plan erzeugen -> .polaris/reclassify-plan.json
-polaris-curator reclassify Firma --apply   # genau diesen Plan anwenden (Backup vorher)
+polaris-curator reclassify Company           # create plan -> .polaris/reclassify-plan.json
+polaris-curator reclassify Company --apply   # apply exactly this plan (backup first)
 ```
 
-Seit Promptregel 2a ("KI-Assistent ist nie Stakeholder") stufen neue Laeufe
-Antworten von ChatGPT/Claude anders ein; bestehende Eintraege aendert ein
-normaler Lauf nicht. `reclassify` nimmt nur `[Stakeholder-Aussage]`-Eintraege
-mit ausschliesslich Chat-Provenance, laesst das Modell einen Plan liefern und
-prueft jede Aenderung lokal: bekannte ID, gueltige Werte, Scope/Evidenzgrad
-steigen nicht, keine Zahl des alten Texts geht verloren. Unzulaessige
-Aenderungen werden einzeln verworfen. `--apply` wendet nur den gespeicherten
-Plan an und verweigert, wenn sich `knowledge.md` seitdem geaendert hat;
-Provenance bleibt unveraendert, Backup unter `.polaris/backups/`.
+Since prompt rule 2a ("an AI assistant is never a stakeholder"), new runs
+classify answers from ChatGPT/Claude differently; a normal run does not
+change existing entries. `reclassify` takes only `[Stakeholder-Aussage]`
+(stakeholder statement) entries with chat-only provenance, has the model
+deliver a plan and checks every change locally: known ID, valid values,
+scope/evidence strength do not increase, no number from the old text is
+lost. Inadmissible changes are discarded individually. `--apply` applies
+only the saved plan and refuses if `knowledge.md` has changed since;
+provenance stays unchanged, backup under `.polaris/backups/`.
 
-## Projekttrennung und Ruecknahme (seit 2026-09-29)
+## Project separation and retraction (since 2026-09-29)
 
-Anlass: Am 2026-09-29 exportierte die Extension nach einem Chatwechsel die
-noch sichtbaren Nachrichten des alten Chats unter der neuen Adresse; die Nachrichten
-zweier Kundenprojekte landeten im jeweils anderen Projekt. Seither: Erfassung
-als Chat-Abbild (Projekt aus den Anbieterdaten, siehe Haupt-README), die
-Bridge wehrt eine schon anderswo archivierte Nachricht ab, der Curator sperrt,
-und Ruecknahme ist moeglich.
+Background: on 2026-09-29, after a chat switch, the extension exported the
+still visible messages of the old chat under the new address; the messages
+of two client projects ended up in each other's project. Since then: capture
+as a chat snapshot (project taken from the provider data, see the main
+README), the bridge rejects a message already archived elsewhere, the curator
+locks, and retraction is possible.
 
-**Sperre (`integrity.py`):** Vor jedem Lauf prueft der Curator lesend alle
-`raw/*/messages/` der bekannten Projekte. Blockierend (Projekt wird **nicht
-kuratiert**, `aborted_reason=integrity`, Health-Zeile „Projekttrennung“ rot):
-`duplicate_id` (dieselbe ID in mehreren Projekten/Chats), `foreign_project`,
-`url_mismatch` und `bridge_conflict` (Datei in
-`~/.local/share/polaris/conflicts/` - sperrt **beide** Projekte, weil die
-zuerst archivierte Kopie die falsche sein kann). Nicht blockierend, gelb:
+**Lock (`integrity.py`):** Before every run the curator reads all
+`raw/*/messages/` of the known projects. Blocking (project is **not
+curated**, `aborted_reason=integrity`, health line "Project separation"
+(German UI: „Projekttrennung“) red): `duplicate_id` (same ID in several
+projects/chats), `foreign_project`, `url_mismatch` and `bridge_conflict`
+(file in `~/.local/share/polaris/conflicts/` - locks **both** projects,
+because the copy archived first may be the wrong one). Non-blocking, yellow:
 `index_mismatch`, `unreadable`, `unknown_project`.
 
-**Konflikt klaeren:** `polaris conflicts` listet, `polaris conflicts
---resolve <Datei> --keep existing|rejected` loest: die verworfene Kopie
-wandert in `~/.local/share/polaris/quarantine/conflicts-<Datum>/`, bei
-`rejected` wird die abgewehrte Kopie regulaer abgelegt. War die falsche Kopie
-schon kuratiert, nennt die Ausgabe den `retract`-Befehl. Konfliktdateien
-nicht einfach loeschen - das koennte die richtige Kopie verlieren.
+**Resolving a conflict:** `polaris conflicts` lists, `polaris conflicts
+--resolve <file> --keep existing|rejected` resolves: the discarded copy
+moves to `~/.local/share/polaris/quarantine/conflicts-<date>/`; with
+`rejected` the rejected copy is filed regularly. If the wrong copy was
+already curated, the output names the `retract` command. Do not simply
+delete conflict files - that could lose the correct copy.
 
-**Ruecknahme (`retract`):**
+**Retraction (`retract`):**
 
 ```
-polaris-curator retract Kunde-B --from-dir ~/.local/share/polaris/quarantine/X/Kunde-B          # anzeigen
-polaris-curator retract Kunde-B --from-dir ... --apply              # nur reine Eintraege entfernen
-polaris-curator retract Kunde-B --from-dir ... --apply --rebuild    # betroffene Batches neu kuratieren
+polaris-curator retract Client-B --from-dir ~/.local/share/polaris/quarantine/X/Client-B          # show
+polaris-curator retract Client-B --from-dir ... --apply              # remove only pure entries
+polaris-curator retract Client-B --from-dir ... --apply --rebuild    # re-curate affected batches
 ```
 
-Herkunftsangaben nennen alle Nachrichten eines Tagesbatches, eine
-eingeschleppte Nachricht steckt also meist mit echten im selben Eintrag.
-`--apply` entfernt nur Eintraege, deren Quellen ausschliesslich
-zurueckgenommene Nachrichten sind. `--rebuild` entfernt alle Eintraege, die
-eine Nachricht der betroffenen Batches nennen (transitiv ueber verdichtete
-Eintraege), und markiert deren saubere Nachrichten im State als
-unverarbeitet; der naechste Lauf baut das Wissen daraus neu auf.
-Eintraege mit zusaetzlicher Dokumentquelle bleiben stehen und werden zur
-Handpruefung gemeldet. Zurueckgenommene IDs bleiben als verarbeitet
-markiert. IDs, die noch im Rohbestand dieses Projekts liegen, werden ohne
-`--force` ausgelassen (Schutz davor, den Quarantaene-Ordner des *anderen*
-Projekts zu uebergeben). Vorher Backup unter `.polaris/backups/`, entfernte
-Eintraege woertlich in `.polaris/retracted/<zeit>.md`.
+Provenance lists all messages of a daily batch, so an imported foreign
+message usually sits in the same entry as genuine ones. `--apply` removes
+only entries whose sources are exclusively retracted messages. `--rebuild`
+removes all entries that name a message of the affected batches
+(transitively via compacted entries) and marks their clean messages as
+unprocessed in the state; the next run rebuilds the knowledge from them.
+Entries with an additional document source stay and are reported for manual
+review. Retracted IDs stay marked as processed. IDs that are still in this
+project's raw stock are skipped without `--force` (protection against
+passing in the quarantine folder of the *other* project). Backup beforehand
+under `.polaris/backups/`, removed entries verbatim in
+`.polaris/retracted/<time>.md`.
 
-## Abdeckung, Journal, Robustheit (seit 2026-09-29)
+## Coverage, journal, robustness (since 2026-09-29)
 
-- **Jeder Text eines Chats wird genau einmal kuratiert** (`chatgpt_source.
-  load_new_messages`): ein Absatz (normalisiert, >= 20 Zeichen), der schon in
-  einer kuratierten Fassung desselben Chats steht, geht nicht noch einmal an
-  das Modell - egal unter welcher ID, ueber welchen Erfassungsweg oder in
-  welcher Formatierung er kommt. Vollstaendig abgedeckte Nachrichten werden
-  ohne Modellaufruf vermerkt; Teilstuecke mit Chat-Titel und vorangehender
-  Frage. Zurueckgenommene Nachrichten (`retracted_ids`) nie wieder; Turns
-  verworfener Zweige (`active_message_ids` aus dem Chat-Abbild) werden
-  uebergangen.
-- **Write-Ahead-Journal** (lokal unter `~/.local/state/polaris/journals/`,
-  bis 2026-10-10 `.polaris/journal.json` auf dem Drive-Mount - dort ging das
-  Loeschen verloren und ein Rest sperrte das Projekt; der alte Ort wird seit
-  2026-11-05 nicht mehr gelesen): Zielzustand aller
-  Dateien und State-Aenderung vor dem Schreiben; ein unterbrochener Schritt
-  wird beim naechsten Lauf vollendet. Passt eine Datei nicht mehr (jemand hat
-  sie anders geaendert) oder ist das Journal beschaedigt, wird das Projekt
-  gesperrt und im Health Check rot („Kurationsschritte“).
-  `polaris-curator journal <Projekt>` zeigt den Stand, `--discard` verwirft
-  ihn (Backup; die Quellen werden neu kuratiert). compact/reclassify/retract
-  verweigern bei offenem Journal.
-- **Warteschlange:** erste Einheit eines Laufs darf groesser als das Budget
-  sein; wiederholt scheiternde Einheiten ruecken 24 h nach hinten (Warnung ab
-  2); Fehler eines Projekts halten run-all nicht auf (Mount-Fehler: Exit 75).
+- **Every text of a chat is curated exactly once** (`chatgpt_source.
+  load_new_messages`): a paragraph (normalised, >= 20 characters) that
+  already appears in a curated version of the same chat is not sent to the
+  model again - regardless of the ID, capture path or formatting it arrives
+  with. Fully covered messages are recorded without a model call; partial
+  pieces go with the chat title and the preceding question. Retracted
+  messages (`retracted_ids`) never again; turns of discarded branches
+  (`active_message_ids` from the chat snapshot) are skipped.
+- **Write-ahead journal** (local under `~/.local/state/polaris/journals/`;
+  until 2026-10-10 `.polaris/journal.json` on the Drive mount - there the
+  deletion got lost and a leftover locked the project; the old location is
+  no longer read since 2026-11-05): target state of all files and the state
+  change before writing; an interrupted step is completed on the next run.
+  If a file no longer matches (someone changed it differently) or the
+  journal is damaged, the project is locked and shown red in the health
+  check ("Curation steps"; German UI: „Kurationsschritte“).
+  `polaris-curator journal <project>` shows the status, `--discard` discards
+  it (backup; the sources are curated again). compact/reclassify/retract
+  refuse while a journal is open.
+- **Queue:** the first unit of a run may be larger than the budget;
+  repeatedly failing units move back 24 h (warning from 2); errors in one
+  project do not stop run-all (mount error: exit 75).
 
-## Eintragsnummern, Ablösung, Herkunft je Aussage (seit 2026-09-29)
+## Entry IDs, supersession, provenance per statement (since 2026-09-29)
 
-Drei erprobte Konzepte aus LLM-Gedaechtnis-Systemen, ohne neue Abhaengigkeit
-im bestehenden Markdown umgesetzt:
+Three proven concepts from LLM memory systems, implemented in the existing
+Markdown without a new dependency:
 
-1. **Nummern statt Textmarken.** Jeder Eintrag traegt eine sichtbare,
-   stabile Nummer: `ID: K12` (knowledge.md, Archiv), `**ID** D3`
-   (decisions.md), `ID: L7` (open-loops.md). Das Modell aendert ueber die
-   Nummer (`replaces_id`, `decision_id`, `loop_id`) statt ueber einen
-   Textausschnitt, den es wiederfinden muesste. Unbekannte Nummer: nichts
-   wird geraten (Eintrag angehaengt bzw. Aenderung uebergangen, Warnung).
-   Nummern werden nie wiederverwendet (hoechste je gesehene + 1, inkl.
-   Verweisen und Zaehlerzeile `<!-- polaris-ids: K=.. -->` im Dateikopf);
-   zusammengefuehrte Eintraege behalten die erste Nummer und vermerken die
-   uebrigen (`Zusammengeführt: K7`). Als Nummer gilt nur die eigene
-   Unterzeile `  - ID: K12`, nie Fliesstext oder Code. Eintraege ohne Nummer
-   werden bei jedem Lauf nach der Integritaetspruefung nummeriert - nur
-   Zeilen eingefuegt, ueber das Journal, Backup `*-before-ids`; doppelte
-   Ueberschriften in decisions.md werden zu "… (2)".
-2. **Gültig seit / Abgelöst durch.** Neue Eintraege tragen `Gültig seit`.
-   Ersetzt ein Eintrag einen anderen, wandert der alte mit „Abgelöst durch
-   K40 am …“ nach `knowledge-archiv.md` (nicht ueberschrieben); der neue
-   vermerkt `Ersetzt: K12` und behaelt dessen Herkunft. Eine schon
-   abgeloeste Nummer fuehrt ueber die Kette `Ersetzt:` zur aktuellen
-   Fassung. Entscheidungen bekommen `**Ersetzt durch**`, erledigte Punkte
-   „erledigt am …“.
-3. **Herkunft je Aussage.** Jeder Eintrag nennt `source_message_ids` - die
-   Nachrichten, auf die er sich stuetzt. In die Herkunftsangabe kommen nur
-   IDs aus dem aktuellen Batch; fehlt die Angabe oder passt keine, gilt wie
-   frueher der ganze Batch (nie ein Eintrag ohne Herkunft). Nennt der
-   Eintrag nur einen Teil, steht zusaetzlich `batch_ids=` (ganzer Batch).
-   Fuer die Kundentrennung zaehlt immer der ganze Batch: `retract` entfernt
-   ohne `--rebuild` nur ganz zurueckgenommene Batches und zeigt die Angabe
-   des Modells nur als Hinweis; `--rebuild` entfernt alles, was den Batch
-   gesehen hat, und baut den sauberen Teil neu auf.
+1. **IDs instead of text markers.** Every entry carries a visible, stable
+   ID: `ID: K12` (knowledge.md, archive), `**ID** D3` (decisions.md),
+   `ID: L7` (open-loops.md). The model changes entries via the ID
+   (`replaces_id`, `decision_id`, `loop_id`) instead of via a text excerpt it
+   would have to find again. Unknown ID: nothing is guessed (entry appended
+   or change skipped, warning). IDs are never reused (highest ever seen + 1,
+   incl. references and the counter line `<!-- polaris-ids: K=.. -->` in the
+   file header); merged entries keep the first ID and record the others
+   (`Zusammengeführt: K7`, "merged"). Only the dedicated sub-line
+   `  - ID: K12` counts as an ID, never running text or code. Entries
+   without an ID are numbered on every run after the integrity check - only
+   lines inserted, via the journal, backup `*-before-ids`; duplicate
+   headings in decisions.md become "… (2)".
+2. **Valid since / superseded by.** New entries carry `Gültig seit` (valid
+   since). If an entry replaces another, the old one moves to
+   `knowledge-archiv.md` with „Abgelöst durch K40 am …“ (superseded by K40
+   on …) (not overwritten); the new one records `Ersetzt: K12` (replaces)
+   and keeps its provenance. An already superseded ID leads via the
+   `Ersetzt:` chain to the current version. Decisions get
+   `**Ersetzt durch**` (replaced by), closed items „erledigt am …“ (done
+   on …).
+3. **Provenance per statement.** Every entry names `source_message_ids` -
+   the messages it relies on. Only IDs from the current batch go into the
+   provenance; if the field is missing or none matches, the whole batch
+   applies as before (never an entry without provenance). If the entry names
+   only part of it, `batch_ids=` (whole batch) is added. For client
+   separation the whole batch always counts: without `--rebuild`, `retract`
+   removes only fully retracted batches and shows the model's field only as
+   a hint; `--rebuild` removes everything that saw the batch and rebuilds the
+   clean part.
 
-## Verdichtung von knowledge.md (seit 2026-09-25)
+## Compaction of knowledge.md (since 2026-09-25)
 
 ```bash
-polaris-curator compact <Projekt> --dry-run --show-plan   # Plan ansehen
-polaris-curator compact <Projekt>                          # anwenden
+polaris-curator compact <project> --dry-run --show-plan   # view plan
+polaris-curator compact <project>                          # apply
 ```
 
-Das Modell bekommt die nummerierten Einträge (ohne Provenance) und liefert
-nur einen Plan: echte Dubletten mit zusammengeführter Fassung, sowie durch
-neuere Einträge überholte Einträge. Der Plan wird lokal geprüft und
-deterministisch angewendet; Provenance bleibt vollständig erhalten,
-Klassifikationen werden nie aufgewertet, überholte Einträge wandern nach
-`knowledge-archiv.md` (nichts wird gelöscht), vorher Backup unter
-`.polaris/backups/`. Notbremse: schrumpft die Datei um mehr als die Hälfte,
-wird der Plan verworfen. Automatisch im Timer-Lauf ab
-`compaction.threshold_chars` (Default 100000, 0 = nie), höchstens alle
-`compaction.min_interval_days` (Default 7) Tage.
+The model receives the numbered entries (without provenance) and returns
+only a plan: true duplicates with a merged version, plus entries made
+obsolete by newer entries. The plan is checked locally and applied
+deterministically; provenance is fully preserved, classifications are never
+upgraded, obsolete entries move to `knowledge-archiv.md` (nothing is
+deleted), backup beforehand under `.polaris/backups/`. Emergency brake: if
+the file would shrink by more than half, the plan is discarded. Automatic in
+the timer run from `compaction.threshold_chars` (default 100000, 0 = never),
+at most every `compaction.min_interval_days` (default 7) days.
 
-**Abstand nach ergebnislosen Läufen (seit 2026-10-17):** Findet eine
-Verdichtung nichts (keine Zusammenführung, nichts überholt) bzw. schließt die
-wöchentliche Prüfung offener Punkte (`compaction.loops_review_interval_days`)
-keinen Punkt, verdoppelt sich der Abstand bis zum Faktor
-`compaction.idle_backoff_max` (Default 4: 7 → 14 → 28 Tage; 1 = aus). Ein
-Lauf mit Ergebnis setzt zurück; ist `knowledge.md` seit der letzten
-Verdichtung um 10 % gewachsen, gilt für sie wieder der Grundabstand. Ein
-fehlgeschlagener Lauf ändert den Zähler nicht. Zähler `idle_streak` in
-`.polaris/compact-state.json` bzw. `loops-review.json`. Anlass: Audit
-2026-10-17, die letzten Läufe aller Projekte schlossen 0 Punkte und fanden
-fast keine Dubletten (je Aufruf 80–350k Zeichen Eingabe).
+**Back-off after runs without result (since 2026-10-17):** If a compaction
+finds nothing (no merge, nothing obsolete) or the weekly review of open
+loops (`compaction.loops_review_interval_days`) closes no item, the interval
+doubles up to the factor `compaction.idle_backoff_max` (default 4: 7 → 14 →
+28 days; 1 = off). A run with a result resets it; if `knowledge.md` has grown
+by 10 % since the last compaction, the base interval applies to it again. A
+failed run does not change the counter. Counter `idle_streak` in
+`.polaris/compact-state.json` or `loops-review.json`. Background: audit
+2026-10-17, the last runs of all projects closed 0 items and found almost
+no duplicates (80–350k characters of input per call).
 
-## Schutz vor Verlust und Vermischung (seit 2026-09-29, Architektur-Review)
+## Protection against loss and mixing (since 2026-09-29, architecture review)
 
-- **Nur zugeordnete Nachrichten:** Kuratiert wird nur, was laut
-  `projects.yaml` (status `ok`/`missing_target`) genau diesem Ordner
-  zugeordnet ist. Nachrichten mit fremder oder unbekannter `project.id`
-  (z. B. nach `polaris unmap`) bleiben unverarbeitet liegen; der Lauf warnt,
-  der Health Check zeigt sie. Ohne jede Zuordnung (frische Installation,
-  Tests) wird nicht gefiltert.
-- **Nachtraege:** Eine neue Fassung einer schon kuratierten Nachricht wird
-  nur still uebernommen, wenn kein neuer Absatz mit >= 20 Zeichen
-  dazukommt und alles Neue zusammen < 100 Zeichen hat.
-- **Verdichtung:** Originale zusammengefuehrter Eintraege wandern woertlich
-  ins Archiv; eine Zusammenfuehrung, deren Fassung eine Zahl der Originale
-  verliert, wird verworfen (Ausgabe "verworfen …"). Geschrieben wird ueber
-  das Journal. Faellig spaetestens bei 80 % von `max_curated_context_chars`.
-- **Gekuerzt/Kontextgrenze:** Wird ein Dokument gekuerzt oder ist eine
-  kuratierte Datei groesser als der Kontext, den das Modell sieht, meldet
-  der Lauf das ("gekuerzt kuratiert", "Kontextgrenze").
-- **Drive-Mount:** Unter `project_roots` (`~/.config/polaris/config.yaml`)
-  legt der Curator nie einen Projektordner an; fehlt er, endet der Lauf mit
-  Exit 75 (spaeter erneut) statt Schattenordner auf der lokalen Platte.
-- **Laufergebnis:** `run`/`run-all` schreiben `.polaris/last-run.json`
-  (Fehler, wichtige Warnungen, Rueckstand). Das Widget zeigt es unter
-  Curator > Kuration (gelb bei Fehlern, wichtigen Warnungen, wiederholt
-  scheiternden Einheiten, Rueckstand > 7 Tage).
-- **Codex-Fehler:** Im Fehlertext stehen nur die `ERROR`-Zeilen von codex
-  (kein Prompt-Echo mit Kundeninhalt); ein Nutzungslimit wird als solches
-  benannt. Neuversuche alle 20 min bis ~8 h (Unit: 12 h / 25 Starts).
+- **Only mapped messages:** only what `projects.yaml` (status
+  `ok`/`missing_target`) maps to exactly this folder is curated. Messages
+  with a foreign or unknown `project.id` (e.g. after `polaris unmap`) stay
+  unprocessed; the run warns, the health check shows them. Without any
+  mapping (fresh installation, tests) nothing is filtered.
+- **Late additions:** a new version of an already curated message is only
+  adopted silently if no new paragraph with >= 20 characters is added and
+  everything new together is < 100 characters.
+- **Compaction:** originals of merged entries move verbatim to the archive;
+  a merge whose version loses a number from the originals is discarded
+  (output "verworfen …", discarded). Writing goes via the journal. Due at
+  the latest at 80 % of `max_curated_context_chars`.
+- **Truncated/context limit:** if a document is truncated or a curated file
+  is larger than the context the model sees, the run reports it ("gekuerzt
+  kuratiert", curated truncated; "Kontextgrenze", context limit).
+- **Drive mount:** the curator never creates a project folder under
+  `project_roots` (`~/.config/polaris/config.yaml`); if it is missing, the
+  run ends with exit 75 (retry later) instead of creating shadow folders on
+  the local disk.
+- **Run result:** `run`/`run-all` write `.polaris/last-run.json` (errors,
+  important warnings, backlog). The widget shows it under Curator > Curation
+  (German UI: Curator > Kuration) (yellow on errors, important warnings,
+  repeatedly failing units, backlog > 7 days).
+- **Codex errors:** the error text contains only codex's `ERROR` lines (no
+  prompt echo with client content); a usage limit is named as such. Retries
+  every 20 min for up to ~8 h (unit: 12 h / 25 starts).
 
-## Claude: Ersatzmodell und unabhaengige Pruefung (seit 2026-09-30)
+## Claude: fallback model and independent review (since 2026-09-30)
 
-- `claude_fallback_model` (z. B. `opus`): ist Codex nicht erreichbar (Limit,
-  Ausfall), kuratiert direkt Claude ueber `claude -p` (abgeschottet: keine
-  Werkzeuge, keine Einstellungen/CLAUDE.md, keine Sitzung). Nur bei Prompts
-  mit Bildern bleibt das zweite Codex-Modell (`fallback_model`).
-- `reviewer_model` (z. B. `opus`): Claude prueft jeden neuen Eintrag gegen
-  den ganzen Quellinhalt (bei Abloesungen mit dem alten Eintrag). Nichts
-  wird verworfen; schwere Beanstandungen stehen als "Prüfhinweis" am
-  Eintrag und im Laufergebnis, alle Befunde in `.polaris/review-findings.json`.
-  Ohne Pruefung: Dokumente mit Bildern, von Claude selbst kuratierte Batches,
-  und nach einem Ausfall des Pruefers der Rest des Laufs (gemeldet).
+- `claude_fallback_model` (e.g. `opus`): if Codex is unreachable (limit,
+  outage), Claude curates directly via `claude -p` (sealed off: no tools, no
+  settings/CLAUDE.md, no session). Only for prompts with images does the
+  second Codex model (`fallback_model`) remain.
+- `reviewer_model` (e.g. `opus`): Claude checks every new entry against the
+  whole source content (for supersessions together with the old entry).
+  Nothing is discarded; serious objections appear as a "Prüfhinweis" (review
+  note) on the entry and in the run result, all findings in
+  `.polaris/review-findings.json`. Not reviewed: documents with images,
+  batches curated by Claude itself, and, after a reviewer outage, the rest
+  of the run (reported).
 
-## Grosse Dokumente und doppelte Anhaenge (seit 2026-10-07)
+## Large documents and duplicate attachments (since 2026-10-07)
 
-- Limit je Dokument = `max_input_chars_per_batch` (hoechstens das Laufbudget).
-- Bis `document_oversize_factor` (Standard 2) mal dem Limit geht ein Dokument
-  ausnahmsweise in **einem** Aufruf durch: guenstiger als Teile, weil das
-  Projektwissen nur einmal mitgeschickt wird.
-- Darueber wird es in **Teile** zur Groesse des Limits zerlegt (an Zeilen-
-  enden), Teil fuer Teil kuratiert; jeder Teil sieht das Wissen aus den
-  vorherigen. Das Budget pro Lauf gilt weiter, Restteile kommen im naechsten
-  Lauf. Fortschritt: `document_parts` im Zustand; archiviert wird erst nach dem
-  letzten Teil. Hoechstens `max_parts_per_document` (Standard 5) Teile, der
-  Rest wird gekuerzt und als "gekuerzt kuratiert" gemeldet - dieser Hinweis
-  erscheint nur noch fuer wirklich kuratierte Dokumente.
-- Mail-Anhaenge, die byte-gleich als eigenes Dokument in `inbox/documents`
-  bzw. `inbox/notes` liegen oder schon kuratiert sind, werden nur abgelegt und
-  verwiesen ("identisch mit …, dort ausgewertet") statt doppelt kuratiert.
+- Limit per document = `max_input_chars_per_batch` (at most the run budget).
+- Up to `document_oversize_factor` (default 2) times the limit, a document
+  exceptionally goes through in **one** call: cheaper than parts, because
+  the project knowledge is sent only once.
+- Above that it is split into **parts** the size of the limit (at line
+  ends), curated part by part; each part sees the knowledge from the
+  previous ones. The per-run budget still applies, remaining parts come in
+  the next run. Progress: `document_parts` in the state; archiving happens
+  only after the last part. At most `max_parts_per_document` (default 5)
+  parts, the rest is truncated and reported as "gekuerzt kuratiert" (curated
+  truncated) - this notice now appears only for documents that were actually
+  curated.
+- Mail attachments that are byte-identical to a document of their own in
+  `inbox/documents` or `inbox/notes`, or already curated, are only filed and
+  referenced ("identisch mit …, dort ausgewertet", identical to …, evaluated
+  there) instead of being curated twice.
 
 ```yaml
 budget:
-  max_parts_per_document: 5        # 1 = nie teilen
-  document_oversize_factor: 2.0    # 1.0 = nie einmalig groesser
+  max_parts_per_document: 5        # 1 = never split
+  document_oversize_factor: 2.0    # 1.0 = never allow a one-off larger call
 ```
 
-## Budgetschutz
+## Budget protection
 
-Harte Limits pro Lauf (siehe Config oben). Wird ein Limit erreicht, endet
-der Lauf sauber, verbleibende Batches/Dokumente bleiben offen und werden
-beim naechsten Lauf (naechster Timer-Tick oder manueller Aufruf)
-weiterverarbeitet - aeltester offener Tagesbatch zuerst. Kein Batch wird
-als verarbeitet markiert, wenn der zugehoerige LLM-Call oder Merge nicht
-vollstaendig erfolgreich war.
+Hard limits per run (see config above). When a limit is reached, the run
+ends cleanly; remaining batches/documents stay open and are processed in the
+next run (next timer tick or manual call) - oldest open daily batch first.
+No batch is marked as processed unless the corresponding LLM call or merge
+was fully successful.
 
-Ist das primaere Modell nicht erreichbar, wird genau einmal das
-Fallback-Modell versucht; schlaegt auch das fehl, bricht der gesamte Lauf
-sauber ab (nichts wird als verarbeitet markiert, der naechste Lauf
-wiederholt automatisch). Eine ungueltige Modellantwort (Format-/
-Schema-Fehler) betrifft dagegen nur den einzelnen Batch - der Lauf faehrt
-mit den uebrigen Einheiten fort.
+If the primary model is unreachable, the fallback model is tried exactly
+once (with `claude_fallback_model` set, Claude takes that place except for
+prompts with images; see "Claude: fallback model and independent review"); if that fails too, the whole run aborts cleanly (nothing is marked as
+processed, the next run retries automatically). An invalid model answer
+(format/schema error), by contrast, only affects the individual batch - the
+run continues with the remaining units.
 
-## Tagesbatching
+## Daily batching
 
-Neue ChatGPT-Messages werden pro Projekt und lokalem Kalendertag
-gruppiert (Zeitanker: `captured_at`, da `source_timestamp` in der
-aktuellen Extension-Version immer `null` ist). Zu grosse Tage werden in
-Sub-Batches geteilt (`2026-09-12#1`, `2026-09-12#2`, ...), wobei
-zusammenhaengende Conversation-Bloecke nach Moeglichkeit nicht
-auseinandergerissen werden. Ein Tag ist nie endgueltig "abgeschlossen" -
-neue Messages desselben Tages werden beim naechsten Lauf automatisch als
-Nachtrag erkannt (State basiert auf Message-IDs, nicht auf dem Datum
-allein).
+New chat messages (ChatGPT and Claude) are grouped per project and local
+calendar day (time anchor: `source_timestamp` from the provider data where
+present, otherwise `captured_at`). Days that are too large are split into
+sub-batches (`2026-09-12#1`, `2026-09-12#2`, ...), keeping related
+conversation blocks together where possible. A day is never finally
+"closed" - new messages from the same day are automatically recognised as a
+late addition on the next run (state is based on message IDs, not on the
+date alone).
 
-## Catch-up nach mehrtaegiger Pause
+## Catch-up after a pause of several days
 
-Beim naechsten Lauf werden alle seit dem letzten Erfolg offenen
-Tagesbatches erkannt und chronologisch (aeltester zuerst) innerhalb des
-Budgets abgearbeitet. Reicht das Budget nicht fuer alle offenen Tage,
-verarbeitet der naechste Lauf die restlichen - keine Ueberschreitung des
-Budgets nur wegen Rueckstand.
+On the next run, all daily batches open since the last success are detected
+and worked through chronologically (oldest first) within the budget. If the
+budget does not suffice for all open days, the next run processes the rest
+- the budget is never exceeded just because of a backlog.
 
-## Qualitaetslogik (v0.2)
+## Quality logic (v0.2)
 
-`change_schema.py` erzwingt pro `knowledge_updates`-Eintrag eine
-Klassifikation, statt sie dem Modell freizustellen (`prompts.py`
-begruendet und illustriert jede Regel im Detail):
+`change_schema.py` enforces a classification per `knowledge_updates` entry
+instead of leaving it to the model (`prompts.py` justifies and illustrates
+each rule in detail):
 
-- `entry_type`: `fact` (belegte Beobachtung) / `stakeholder_claim`
-  (Wahrnehmung/Aussage einer Person - keine bestaetigte Tatsache) /
-  `hypothesis` (analytische Ableitung, muss als Vermutung markiert sein)
-  / `implication` (Bedeutung fuer Operating Model, Fuehrung, Skalierung,
-  Kundenbindung, Wirtschaftlichkeit). Echte Entscheidungen gehoeren
-  separat in `decisions_add`.
+- `entry_type`: `fact` (evidenced observation) / `stakeholder_claim`
+  (perception/statement of a person - not a confirmed fact) /
+  `hypothesis` (analytical inference, must be marked as an assumption)
+  / `implication` (meaning for operating model, leadership, scaling,
+  customer retention, profitability). Real decisions belong separately in
+  `decisions_add`.
 - `scope` (`local`/`functional`/`cross_functional`/`company_wide`) +
   `evidence_strength` (`single_source`/`multiple_sources`/`corroborated`)
-  + `confidence` verhindern, dass ein Einzelfall ("das ist ueberall so")
-  direkt als unternehmensweites Muster gespeichert wird - Hochstufen nur
-  bei tatsaechlich mehreren unabhaengigen Quellen.
-- `causal_chain` (nur bei `hypothesis`) erfasst vermutete
-  Ursache-Wirkungs-Ketten (z.B. fehlende interne Bearbeitung ->
-  persoenliche Kompensation -> Belastung -> Key-Person-Risiko ->
-  Mandatsrisiko) explizit als Hypothese, nie als Fakt.
-- `key_person_dependency` erfasst gezielt Kompensationsmuster (Kunden
-  bleiben wegen einer Person, ein Prozess laeuft nur durch persoenliches
-  Nachhalten, Eskalationen laufen wiederholt ueber dieselbe Person).
-- Founder-/Management-Bottlenecks: eine Eskalation an eine einzelne
-  Fuehrungsperson wird als kurzfristige Intervention (`decisions_add`,
-  meist `decision_scope=local`/`provisional`) UND separat als
-  `open_loops_add` mit `loop_type=leadership_question` erfasst (wie
-  saehe der dauerhafte, skalierbare Mechanismus aus?) - nie als bereits
-  geloeste Prozessfrage.
-- `decisions_add.validated` muss bei einer neuen Entscheidung `false`
-  sein (strukturell erzwungen, siehe `change_schema.py`) - eine
-  eingefuehrte Massnahme gilt nicht automatisch als wirksam.
-  `decisions_update` kann `validated`/`validation_note` spaeter setzen,
-  wenn eine Folgequelle das tatsaechlich belegt.
-- `open_loops_add.loop_type` kategorisiert offene Punkte (Datenbedarf,
-  Fuehrungsfrage, Wirksamkeitspruefung, Prozess-/Verantwortungsluecke,
-  wirtschaftliche Frage) statt eines reinen To-do-Archivs.
-- Abgleich mit bestehendem Wissen: der Prompt bekommt den aktuellen
-  Stand aller drei Dateien als Kontext und wird angewiesen, eine
-  bestaetigende/praezisierende neue Quelle ueber `mode=replace` +
-  `replace_marker` (plus `related_existing_insight`) in den bestehenden
-  Eintrag zu verdichten (z.B. Evidenzgrad hochstufen), statt einen neuen,
-  fast identischen Eintrag anzuhaengen. `merge.py` ersetzt dabei den
-  GANZEN alten Eintrags-Block (Klassifikation + Meta-Zeilen +
-  Provenance), nicht nur die erste Zeile - sonst blieben alte
-  Meta-Zeilen verwaist stehen.
-- `self_review` (Pflichtfeld am Ende der Modellantwort): 9 boolesche
-  Felder, die exakt die Kritik-Checkliste aus der Aufgabenstellung
-  abbilden (Stakeholder-Aussage faelschlich als Fakt? Einzelfall
-  ueberverallgemeinert? Intervention als bewiesen dargestellt?
-  systemische Implikation uebersehen? Key-Person-Abhaengigkeit
-  uebersehen? Kunden-/wirtschaftliche Wirkung uebersehen?
-  Fuehrungsperson als dauerhafter Prozessersatz behandelt? langfristig
-  relevant/nicht redundant? Aussage geht nicht ueber die Quelle hinaus?).
-  `pipeline.py` verwirft den GESAMTEN Batch lokal (kein Merge, Batch gilt
-  als nicht verarbeitet, wird beim naechsten Lauf erneut versucht), wenn
-  auch nur ein Feld `false` ist - der Prompt sagt dem Modell das explizit,
-  um einen Anreiz zu setzen, vor dem Antworten tatsaechlich zu korrigieren
-  statt nur zu behaupten.
+  + `confidence` prevent a single case ("it's like this everywhere") from
+  being stored directly as a company-wide pattern - upgrading only with
+  actually several independent sources.
+- `causal_chain` (only for `hypothesis`) records presumed cause-effect
+  chains (e.g. missing internal handling -> personal compensation ->
+  strain -> key-person risk -> mandate risk) explicitly as a hypothesis,
+  never as a fact.
+- `key_person_dependency` specifically records compensation patterns
+  (clients stay because of one person, a process only works through
+  personal follow-up, escalations repeatedly go through the same person).
+- Founder/management bottlenecks: an escalation to a single leader is
+  recorded as a short-term intervention (`decisions_add`, usually
+  `decision_scope=local`/`provisional`) AND separately as `open_loops_add`
+  with `loop_type=leadership_question` (what would the permanent, scalable
+  mechanism look like?) - never as an already solved process question.
+- `decisions_add.validated` must be `false` for a new decision
+  (structurally enforced, see `change_schema.py`) - an introduced measure is
+  not automatically considered effective. `decisions_update` can set
+  `validated`/`validation_note` later when a follow-up source actually
+  proves it.
+- `open_loops_add.loop_type` categorises open items (data need, leadership
+  question, effectiveness check, process/responsibility gap, economic
+  question) instead of a mere to-do archive.
+- Reconciliation with existing knowledge: the prompt receives the current
+  state of all three files as context and is instructed to condense a
+  confirming/refining new source into the existing entry via `mode=replace`
+  + `replaces_id` (the entry's ID, plus `related_existing_insight`) (e.g.
+  upgrading the evidence strength) instead of appending a new, almost
+  identical entry. `merge.py` moves the WHOLE old entry block
+  (classification, meta lines, provenance) to `knowledge-archiv.md` as
+  superseded and writes the new entry with `Ersetzt: K..`.
+- `self_review` (mandatory field at the end of the model answer): 9 boolean
+  fields that map exactly the critique checklist from the task specification
+  (stakeholder statement wrongly presented as fact? single case
+  overgeneralised? intervention presented as proven? systemic implication
+  overlooked? key-person dependency overlooked? client/economic impact
+  overlooked? leader treated as a permanent process substitute? relevant in
+  the long term/not redundant? statement does not go beyond the source?).
+  `pipeline.py` discards the ENTIRE batch locally (no merge, batch counts as
+  unprocessed, is retried on the next run) if even one field is `false` -
+  the prompt tells the model this explicitly, to create an incentive to
+  actually correct before answering rather than merely claim to.
 
-**Wichtige Einschraenkung**: `self_review` ist eine Selbstauskunft
-desselben Modellaufrufs, kein unabhaengiger zweiter Blick. Sie zwingt das
-Modell, die Kritik-Kriterien als Pflichtfelder explizit "durchzudenken"
-(mehr erzwungene Zwischenschritte vor der finalen Antwort), ersetzt aber
-keine echte, vom Erzeuger unabhaengige Zweitpruefung. Ob das ausreicht
-oder ein echter zweiter, unabhaengiger Kritik-Call noetig ist, sollte
-anhand weiterer reproduzierter Faelle (nicht nur des einen
-RPS/Schkeuditz-Testlaufs) neu bewertet werden - siehe "Modellstrategie".
+**Important limitation**: `self_review` is a self-report from the same model
+call, not an independent second look. It forces the model to explicitly
+"think through" the critique criteria as mandatory fields (more enforced
+intermediate steps before the final answer), but does not replace a real
+second review independent of the producer. Whether this suffices or a real
+second, independent critique call is needed should be reassessed on the
+basis of further reproduced cases (not just the one real test run) - see
+"Model strategy". Since 2026-09-30 an optional independent review by Claude
+exists (`reviewer_model`, see "Claude: fallback model and independent
+review").
 
-## Modellstrategie
+## Model strategy
 
-Bewusst NICHT geaendert in v0.2: weiterhin `gpt-5.6-luna` (guenstig,
-laut Codex-Katalog fuer agentisches Coding, nicht spezifisch fuer tiefes
-analytisches Reasoning optimiert) in einem einzelnen `codex exec`-Call
-pro Batch/Dokument, der Extraktion UND Klassifikation UND
-Merge-Entscheidung in einem Schritt erledigt.
+**Current state (since 2026-09-24):** main model `gpt-6-astra` with
+`reasoning_effort: medium`, fallback `gpt-5.6-sol` (Codex template). A live
+A/B test on a real mail with attachments showed `gpt-6-astra` clearly better
+than `gpt-5.6-luna` (condensing instead of duplicating, use of spreadsheet
+content, cross-source implications) at roughly the same token usage but more
+than twice the run time; hence the higher timeout. Still one call per
+batch/document. The history below explains the v0.2 decision.
 
-Begruendung: Der urspruengliche Qualitaetsverlust im RPS/Schkeuditz-
-Testlauf war ueberwiegend WORKFLOW-/SCHEMA-bedingt (keine erzwungene
-Klassifikation, kein Scope/Evidenzgrad, keine Selbstkritik, keine
-Anleitung zu Wirkungsketten/Key-Person-Mustern), nicht primaer
-Modell-bedingt - dieselbe Aufgabenstellung fordert deshalb explizit,
-Prompting/Workflow/Datenmodell zuerst zu verbessern und erst danach zu
-pruefen, ob verbleibende Probleme tatsaechlich am Modell liegen. Ein
-ungeprueft groesseres/teureres Modell haette dieses Risiko verdeckt statt
-behoben.
+Deliberately NOT changed in v0.2: still `gpt-5.6-luna` (cheap, according to
+the Codex catalogue for agentic coding, not specifically optimised for deep
+analytical reasoning) in a single `codex exec` call per batch/document that
+handles extraction AND classification AND the merge decision in one step.
 
-Falls der Regressionstest (unten) nach dieser Aenderung weiterhin
-systematische Schwaechen zeigt, die eher nach Reasoning-Limit als nach
-Prompt-/Schema-Luecke aussehen (z.B. wiederholt uebersehene
-Wirkungsketten trotz expliziter Anleitung), ist die im Auftrag
-vorgeschlagene Zwei-Stufen-Architektur die naheliegende naechste
-Eskalationsstufe: ein guenstiges Modell fuer reine
-Parsing-/Extraktionsschritte, ein staerkeres Reasoning-Modell NUR fuer
-den Synthese-/Bewertungs-/Kontextabgleich-Schritt (zweiter `codex
-exec`-Call mit dem extrahierten Rohmaterial + aktuellem Wissensstand als
-Input). Das wuerde die Anzahl der LLM-Calls pro Einheit verdoppeln
-(Budget-Konfiguration muesste entsprechend angepasst werden) und ist
-DESHALB hier bewusst noch nicht implementiert, sondern als Option
-dokumentiert.
+Rationale: the original quality loss in the real test run was
+predominantly WORKFLOW/SCHEMA-related (no enforced classification, no
+scope/evidence strength, no self-review, no guidance on causal
+chains/key-person patterns), not primarily model-related - the same task
+specification therefore explicitly demands improving prompting/workflow/data
+model first and only then checking whether remaining problems are actually
+due to the model. An unvetted larger/more expensive model would have masked
+this risk instead of fixing it.
 
-## Dokumentquellen
+If the regression test (below) still shows systematic weaknesses after this
+change that look more like a reasoning limit than a prompt/schema gap (e.g.
+repeatedly overlooked causal chains despite explicit guidance), the
+two-stage architecture proposed in the brief is the obvious next escalation
+step: a cheap model for pure parsing/extraction steps, a stronger reasoning
+model ONLY for the synthesis/assessment/context-reconciliation step (second
+`codex exec` call with the extracted raw material + current knowledge state
+as input). That would double the number of LLM calls per unit (the budget
+configuration would have to be adjusted accordingly) and is THEREFORE
+deliberately not yet implemented here, but documented as an option.
 
-Unterstuetzt: `.eml` (Header + Klartext-/HTML-Body + Anhaenge, siehe
-unten), `.pdf` (via `pdftotext`, bereits als Systempaket vorhanden),
-`.docx`, `.xlsx`/`.xlsm`, `.pptx` (nur Python-Standardbibliothek, siehe
-`office_extract.py` - diese Formate sind ZIP-Archive mit XML), `.csv`,
-`.md`, `.txt`. Alte Binaerformate (`.doc`, `.xls`, `.ppt`) und `.msg`
-werden nicht unterstuetzt; solche Dateien in der Inbox werden bei jedem
-Lauf als Warnung ins `curator.log` geschrieben statt still uebergangen.
-Aenderungserkennung ueber SHA-256-Hash der Datei - eine unveraenderte Datei
-wird nie erneut analysiert. Nach erfolgreichem LLM-Aufruf, validiertem
-Merge und lokaler Verarbeitung werden Quelldateien nach
-`inbox/<typ>/archive/processed/` verschoben. Nicht lesbare Dateien sowie
-Quellen mit LLM-, Schema-, Merge- oder Archivierungsfehlern bleiben in der
-Inbox. Bereits vorhandene Archivdateien werden nie ueberschrieben; bei
-Namenskollisionen erhaelt die neue Datei einen kurzen Inhalts-Hash.
+## Document sources
 
-Der Text eines Dokuments (inkl. Anhaenge) wird auf den kleineren Wert von
-`budget.max_input_chars_per_batch` und `budget.max_total_input_chars_per_run`
-gekappt (mit sichtbarem
-Abschneide-Hinweis im Prompt). Vorher konnte ein einzelnes Dokument, das
-groesser als das Laufbudget war, die Warteschlange dauerhaft blockieren.
+Supported: `.eml` (headers + plain-text/HTML body + attachments, see below),
+`.pdf` (via `pdftotext`, already present as a system package), `.docx`,
+`.xlsx`/`.xlsm`, `.pptx` (Python standard library only, see
+`office_extract.py` - these formats are ZIP archives with XML), `.csv`,
+`.md`, `.txt`. Old binary formats (`.doc`, `.xls`, `.ppt`) and `.msg` are
+not supported; such files in the inbox are written to `curator.log` as a
+warning on every run instead of being skipped silently. Change detection via
+the SHA-256 hash of the file - an unchanged file is never analysed again.
+After a successful LLM call, validated merge and local processing, source
+files are moved to `inbox/<type>/archive/processed/`. Unreadable files as
+well as sources with LLM, schema, merge or archiving errors stay in the
+inbox. Existing archive files are never overwritten; on name collisions the
+new file gets a short content hash.
 
-### Mail-Anhaenge (seit 2026-09-24)
+The text of a document (incl. attachments) is limited per call to the
+smaller of `budget.max_input_chars_per_batch` and
+`budget.max_total_input_chars_per_run`. Larger documents go through in one
+call up to `document_oversize_factor` times that, otherwise in parts (see
+"Large documents and duplicate attachments"); only text beyond
+`max_parts_per_document` parts is truncated, with a visible notice. Previously
+a single document larger than the run budget could block the queue
+permanently.
 
-- **Text-Anhaenge** (PDF, DOCX, XLSX, PPTX, CSV, TXT, MD) werden
-  extrahiert und im Prompt als Abschnitt `=== ANHAENGE ===` an den
-  Mailtext angehaengt (pro Anhang max. `attachments.max_chars_per_attachment`
-  Zeichen). XLSX: pro Tabellenblatt max. 500 Zeilen, leere Zellen
-  entfallen, Datumszellen werden als Datum statt Excel-Seriennummer
-  ausgegeben.
-- **Bilder** unter `attachments.min_image_bytes` (Default 300 KB) gelten
-  als Signatur/Logo/Icon und werden weder ausgewertet noch abgelegt.
-  Groessere Bilder (Screenshots, Scans) gehen per `codex exec --image`
-  an das Modell (max. `attachments.max_images_per_document`, Default 5).
-- **Andere Formate** (z.B. `.mpp`, `.zip`, `.xls`) werden nicht
-  ausgewertet, aber abgelegt; der Prompt nennt sie nur mit Dateinamen.
-- Eingebettete, weitergeleitete Mails (`message/rfc822`) werden
-  durchlaufen: ihr Text und ihre Anhaenge zaehlen zur aeusseren Mail.
-- **Ablage**: nach erfolgreicher Kuratierung unter
-  `inbox/mail/archive/attachments/<Name der archivierten Mail>/` - damit
-  liegen die Anhaenge als normale Dateien im Google-Drive-Projektordner
-  und sind auch fuer ChatGPT direkt lesbar. Vorhandene Dateien werden nie
-  ueberschrieben (Namenskollision -> `name (2).ext`). Die Liste der
-  Anhaenge samt Behandlung steht zusaetzlich in `curator-state.json`.
-- Ein kaputter Anhang blockiert die Mail nicht (wird als "nicht lesbar"
-  vermerkt und trotzdem abgelegt).
-- Mails, die VOR dieser Aenderung verarbeitet wurden, werden nicht
-  automatisch neu ausgewertet (sie liegen bereits in `archive/processed/`).
-  Bei Bedarf die betreffende `.eml` zurueck nach `inbox/mail/` legen - Achtung:
-  dann wird auch der Mailtext erneut kuratiert (moegliche Redundanz).
+### Mail attachments (since 2026-09-24)
 
-## Sicherheit / Prompt-Injection
+- **Text attachments** (PDF, DOCX, XLSX, PPTX, CSV, TXT, MD) are extracted
+  and appended to the mail text in the prompt as a section `=== ANHAENGE ===`
+  (per attachment at most `attachments.max_chars_per_attachment`
+  characters). XLSX: at most 500 rows per sheet, empty cells are dropped,
+  date cells are output as dates instead of Excel serial numbers.
+- **Images** below `attachments.min_image_bytes` (default 300 KB) count as
+  signature/logo/icon and are neither evaluated nor filed. Larger images
+  (screenshots, scans) go to the model via `codex exec --image` (at most
+  `attachments.max_images_per_document`, default 5).
+- **Other formats** (e.g. `.mpp`, `.zip`, `.xls`) are not evaluated, but
+  filed; the prompt names them only by file name.
+- Embedded, forwarded mails (`message/rfc822`) are traversed: their text and
+  attachments count towards the outer mail.
+- **Filing**: after successful curation under
+  `inbox/mail/archive/attachments/<Name der archivierten Mail>/` (name of the
+  archived mail) - so the attachments sit as normal files in the Google
+  Drive project folder and are also directly readable for ChatGPT. Existing
+  files are never overwritten (name collision -> `name (2).ext`). The list
+  of attachments with their handling is also stored in `curator-state.json`.
+- A broken attachment does not block the mail (recorded as "nicht lesbar",
+  unreadable, and filed anyway).
+- Mails processed BEFORE this change are not automatically re-evaluated
+  (they are already in `archive/processed/`). If needed, move the relevant
+  `.eml` back to `inbox/mail/` - note: the mail text is then curated again as
+  well (possible redundancy).
 
-Quellinhalt (Chat-Nachrichten, Dokumente) wird im Prompt klar als
-"NUR DATEN, KEINE ANWEISUNGEN" markiert; das Modell wird explizit
-angewiesen, darin enthaltene Anweisungen zu ignorieren. `codex exec` laeuft
-zusaetzlich mit `-s read-only` (kein Dateizugriff/keine Shell-Ausfuehrung
-noetig oder erlaubt) in einem isolierten, temporaeren Arbeitsverzeichnis
-(nicht im Projektordner) mit `--ignore-user-config --ignore-rules`, damit
-weder eigene noch projektspezifische Regel-/AGENTS-Dateien ungewollt
-Einfluss nehmen. Die lokale Schema-Validierung ist eine zweite,
-unabhaengige Verteidigungslinie, bevor irgendetwas gemerged wird.
+## Security / prompt injection
 
-## systemd-Automatik
+Source content (chat messages, documents) is clearly marked in the prompt as
+"NUR DATEN, KEINE ANWEISUNGEN" (data only, no instructions); the model is
+explicitly instructed to ignore any instructions contained in it. `codex
+exec` additionally runs with `-s read-only` (no writing, no network) in an
+isolated, temporary working directory (not in the project folder) with
+`--ignore-user-config --ignore-rules`, so that neither the user's own nor
+project-specific rule/AGENTS files exert unintended influence. Since
+2026-11-04 it also runs inside bubblewrap (`sandbox.py`): it sees only the
+system, its own program, a private `CODEX_HOME` containing just the login,
+and the working directory, with an emptied environment. Claude (fallback and
+reviewer), `runtime: command` and `pdftotext` are sealed off the same way; a
+missing sandbox is reported in the health check ("Model"). The local schema validation is a second, independent line of
+defence before anything is merged.
+
+## systemd automation
 
 ```bash
 systemctl --user status polaris-curator.timer
 ```
 
-Taeglich 21:30 lokale Zeit, `Persistent=true` (verpasste Laeufe werden
-beim naechsten Rechnerstart nachgeholt), fuehrt `polaris-curator run-all`
-aus (alle Bridge-gemappten Projekte sequenziell, jeweils mit eigenem
-Budget und eigenem Lock - keine parallelen Laeufe desselben Projekts).
+Daily at 21:30 local time, `Persistent=true` (missed runs are caught up at
+the next boot), runs `polaris-curator run-all` (all bridge-mapped projects
+sequentially, each with its own budget and its own lock - no parallel runs
+of the same project).
 
 ## Logs
 
-`<Project>/.polaris/curator.log` - nur technische Metadaten (Batch-IDs,
-Message-IDs, Modell, Token-Schaetzung, geaenderte Dateien, Fehler), keine
-vollstaendigen Chat-/Dokumentinhalte.
+`<project>/.polaris/curator.log` - only technical metadata (batch IDs,
+message IDs, model, token estimate, changed files, errors), no complete
+chat/document contents.
 
 ## Tests
 
 ```bash
-cd curator/tests
-python3 -m unittest discover
+cd curator && python3 -m unittest discover -s tests
+scripts/run-tests.sh      # all test suites of the repo (from the repo root)
 ```
 
-78 Tests, reines `unittest`, kein echter Codex-/API-Aufruf (Test-Double
-`FakeLlm`). Decken ab: Message-State/Filterung, Tagesbatching (inkl.
-Ueberlaenge, Conversation-Erhalt), Nachtrag am selben Tag, mehrtaegigen
-Catch-up, Budgetgrenzen, Restart nach fehlgeschlagenem Lauf,
-Dokument-Hashing (inkl. echtem `.pdf` ueber `pdftotext`), Schema-
-Validierung (inkl. Taxonomie-Enums, `validated=false`-Zwang,
-Selbstkritik-Pflichtfelder), Merge (Append/Replace-ganzer-Block/
-Konflikt/Open-Loop-Close/Klassifikations-Rendering), Selbstkritik-Gate
-in der Pipeline (verworfener Batch bei `false`-Flag, erfolgreicher
-Retry im naechsten Lauf), Dry-Run, Idempotenz.
+About 420 tests, plain `unittest`, no real model call (test double
+`FakeLlm`). Besides output check/quarantine, journal, project separation,
+retract, reclassify, compaction, reviewer, command/claude runtimes, sandbox,
+i18n, usage counter, health check and export, they cover: message state/filtering, daily batching (incl. overlength,
+conversation preservation), late addition on the same day, multi-day
+catch-up, budget limits, restart after a failed run, document hashing (incl.
+a real `.pdf` via `pdftotext`), schema validation (incl. taxonomy enums,
+`validated=false` enforcement, self-review mandatory fields), merge
+(append/replace-whole-block/conflict/open-loop close/classification
+rendering), self-review gate in the pipeline (discarded batch on a `false`
+flag, successful retry in the next run), dry run, idempotence.
 
-## ChatGPT-Projektanweisung
+## ChatGPT project instruction
 
-Siehe `chatgpt-project-instruction.md` fuer einen Empfehlungstext, den du
-bei Bedarf manuell in die ChatGPT-Project-Instructions einfuegen kannst.
-Wird nicht automatisch angewendet.
+See `chatgpt-project-instruction.md` for a recommended text that you can
+paste manually into the ChatGPT project instructions if needed. It is not
+applied automatically.
 
-## Bekannte Grenzen (v0.2)
+## Known limitations (v0.2)
 
-- Kein automatischer Model Resolver - Modell-IDs muessen bei Bedarf
-  manuell in `curator.yaml` aktualisiert werden, wenn sich Codex' Katalog
-  aendert.
-- `min_messages_for_early_run`/`min_chars_for_early_run` sind aktuell
-  wirkungslos (siehe Konfigurationsabschnitt oben).
-- `decisions_update`/`open_loops_close`-Matching ist Substring-basiert
-  (einfach, aber bei sehr aehnlichen Titeln/Formulierungen theoretisch
-  mehrdeutig - im Zweifel wird der letzte Treffer verwendet und dies
-  ist nicht separat geloggt).
-- `replace_marker`/`related_existing_insight`-Matching (fuer Verdichtung
-  statt Archiv-Wachstum, siehe "Qualitaetslogik") ist ebenfalls
-  Substring-basiert und haengt vollstaendig davon ab, dass das Modell im
-  Kontext tatsaechlich einen passenden bestehenden Eintrag erkennt - es
-  gibt keine unabhaengige semantische Duplikaterkennung (kein Embedding-
-  Vergleich). Bei sehr grossen `knowledge.md`-Dateien wird der Kontext
-  zudem am Ende auf `max_curated_context_chars` gekappt (von hinten
-  gekuerzt) - aeltere Eintraege koennen dann aus dem Abgleich
-  herausfallen.
-- `self_review` ist eine Selbstauskunft desselben Modellaufrufs, kein
-  unabhaengiger zweiter Blick - siehe Einschraenkung im Abschnitt
-  "Qualitaetslogik" und die Ueberlegung zu einem echten zweiten
-  Kritik-Call in "Modellstrategie".
-- Die neue Klassifikation/Selbstkritik erhoeht die Anforderungen an das
-  Modell pro Call (mehr Pflichtfelder, mehr Bedingungen), ohne die
-  Token-/Kosten-Struktur zu aendern (weiterhin 1 Call pro Batch/
-  Dokument) - ob `gpt-5.6-luna` das zuverlaessig genug leistet oder ein
-  staerkeres Modell fuer den Synthese-Anteil noetig ist, ist erst nach
-  mehreren realen Laeufen (nicht nur dem einen RPS/Schkeuditz-
-  Regressionstest) wirklich zu beurteilen.
-- Kein automatisches Zusammenfassen/Verdichten von `knowledge.md`
-  ueber die Zeit hinweg (jenseits des gezielten `mode=replace` pro
-  Eintrag) - bei sehr vielen bestaetigten Hypothesen kann die Datei
-  langfristig trotzdem wachsen, wenn das Modell einen Bezug nicht
-  erkennt.
+- No automatic model resolver - model IDs must be updated manually in
+  `curator.yaml` when needed if Codex's catalogue changes.
+- `min_messages_for_early_run`/`min_chars_for_early_run` are currently
+  without effect (see configuration section above).
+- Condensing (`replaces_id`, see "Quality logic") depends entirely on the
+  model recognising a matching existing entry - there is no semantic
+  duplicate detection (no embedding comparison). Large files are sent as an
+  index plus the full text of the relevant entries (`full_context_chars`,
+  `index_cap`); entries shown only in the index cannot be replaced (possible
+  duplicates, cleaned up by compaction). Only if the result still exceeds
+  `max_curated_context_chars` is it cut from the back, with a
+  "Kontextgrenze" (context limit) warning.
+- `self_review` is a self-report from the same model call, not an
+  independent second look - unless `reviewer_model` is set (independent
+  Claude review since 2026-09-30, see that section).
+- The new classification/self-review raises the demands on the model per
+  call (more mandatory fields, more conditions) without changing the
+  token/cost structure (still 1 call per batch/document) - whether
+  `gpt-5.6-luna` does this reliably enough or a stronger model is needed for
+  the synthesis part can only really be judged after several real runs (not
+  just the one regression test); since 2026-09-24 the template uses the
+  stronger `gpt-6-astra` (see "Model strategy").
+- Compaction (see "Compaction of knowledge.md") finds only duplicates and
+  obsolete entries that the model recognises; it runs automatically from
+  `compaction.threshold_chars`.

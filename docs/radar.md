@@ -14,7 +14,7 @@ with the kernel and installed packages. For package matches it checks the
 affected version ranges in the [NVD](https://nvd.nist.gov), so a package that
 is already fixed does not stay yellow. It runs once a day
 (`polaris-radar.timer`, about 3 MB) and after `omarchy update`. Details and
-switches: [`memory/README.md`](../memory/README.md) (German).
+switches: [`memory/README.md`](../memory/README.md).
 
 ---
 

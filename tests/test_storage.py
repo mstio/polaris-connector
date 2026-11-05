@@ -35,7 +35,7 @@ class TestClaudeSource(unittest.TestCase):
         with TempHome() as h:
             root = h.make_project_root("MusterFirma")
             project = root / "MusterFirma"
-            event = validate_and_normalize(dict(make_event(project_id="claude-p-1", project_name="COO"), source="claude"))
+            event = validate_and_normalize(dict(make_event(project_id="claude-p-1", project_name="Leitung"), source="claude"))
             path = storage.write_message(project, event)
             self.assertEqual(path.parent, project / "raw" / "claude" / "messages")
             conv = storage.update_conversation_metadata(project, event, event["message"]["id"])

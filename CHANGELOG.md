@@ -8,6 +8,12 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **READMEs auf Englisch (2026-11-05):** `curator/README.md`, `memory/README.md`
+  und `dist/README.md` übersetzt und gegen den Code abgeglichen (u. a.
+  vollständige CLI, Module, Health-Check-Gruppen, Sandbox, `replaces_id`,
+  Modell `gpt-6-astra` in der Vorlage, erledigte „Bekannte Grenzen“).
+  Beispielnamen in der Curator-README neutralisiert.
+
 - **Widget 0.3.2: „Agent fragen“ (2026-11-05):** Bei jeder auffälligen
   Health-Check-Zeile öffnet „Agent fragen“ den Standard-Agenten (Laufzeit
   des Curators) mit der Meldung und, wo bekannt, einem passenden Befehl als

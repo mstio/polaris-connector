@@ -48,7 +48,7 @@ class TestKnownProjectsDedup(unittest.TestCase):
         (tmp / "Falke").mkdir()
         f = tmp / "projects.yaml"
         f.write_text(yaml.safe_dump({"projects": {
-            "claude-p-coo": {"local_path": str(tmp / "MusterFirma"), "status": "ok"},
+            "claude-p-leitung": {"local_path": str(tmp / "MusterFirma"), "status": "ok"},
             "g-p-muster": {"local_path": str(tmp / "MusterFirma"), "status": "ok"},
             "claude-p-verw": {"local_path": str(tmp / "MusterFirma"), "status": "ok"},
             "g-p-falke": {"local_path": str(tmp / "Falke"), "status": "ok"},

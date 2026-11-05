@@ -58,7 +58,7 @@ the configured model runtime for changes and merges them atomically into
 `knowledge.md`, `decisions.md` and `open-loops.md`, with a source reference
 for every entry. A systemd timer runs it; the widget can start it by hand.
 Classification rules, budgets, journal, compaction, retraction and document
-handling are described in [`curator/README.md`](../curator/README.md) (German).
+handling are described in [`curator/README.md`](../curator/README.md).
 
 ![The knowledge.md of the demo project in an editor: sections, entries with type, scope, evidence, confidence, ID and the hidden polaris-source comment pointing to the chat, mail or document](screenshots/knowledge.png)
 

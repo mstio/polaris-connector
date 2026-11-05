@@ -384,7 +384,7 @@ def list_known_projects() -> dict[str, Path]:
     result: dict[str, Path] = {}
     seen: set[Path] = set()
     # Mehrere Zuordnungen koennen auf denselben Ordner zeigen (z. B. ChatGPT
-    # ChatGPT "Firma" + Claude "COO" + Claude "Verwaltungen" -> Firma). Der
+    # ChatGPT "Firma" + Claude "Leitung" + Claude "Vertrieb" -> Firma). Der
     # Curator arbeitet pro ORDNER: jeder Ordner genau einmal, ChatGPT-ID
     # bevorzugt als Vertreter (2026-09-25).
     items = sorted((raw.get("projects") or {}).items(), key=lambda kv: (kv[0].startswith("claude-p-"), kv[0]))

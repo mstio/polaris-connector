@@ -4,7 +4,7 @@ Sicherheitsprinzip (siehe Aufgabenstellung Abschnitt 39/40): Quellinhalt
 wird klar als Daten markiert, niemals als Anweisung. Das Modell bekommt
 explizit gesagt, Anweisungen innerhalb des Quellinhalts zu ignorieren.
 
-v0.2: Diese Datei wurde nach einem Qualitaets-Review (RPS/Schkeuditz-
+v0.2: Diese Datei wurde nach einem Qualitaets-Review (echter
 Testlauf, 2026-09-14) neu strukturiert. Der urspruengliche Prompt hat die
 korrekten Fakten erfasst, aber zu frueh zu einer flachen Zusammenfassung
 abstrahiert - Stakeholder-Wahrnehmung wurde nicht sauber von Fakt

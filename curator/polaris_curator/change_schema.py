@@ -2,7 +2,7 @@
 Aufgabenstellung Abschnitt 22). Codex entscheidet inhaltlich; diese lokale
 Validierung entscheidet, ob dem Ergebnis vertraut und gemerged wird.
 
-v0.2: Aus der Analyse eines echten Testlaufs (RPS/Schkeuditz, 2026-09-14)
+v0.2: Aus der Analyse eines echten Testlaufs (2026-09-14)
 hat sich gezeigt, dass ein einzelnes freies "is_assumption"-Flag zu grob
 ist, um Beobachtung/Fakt, Stakeholder-Aussage, Hypothese und systemische
 Implikation sauber zu trennen, und dass ohne Pflichtfelder fuer
