@@ -79,6 +79,38 @@ Module (`curator/polaris_curator/`):
 - `transfer.py` - `export`: kuratiertes Wissen als ZIP fuer andere Anbieter
 - `cli.py` - `polaris-curator status/status-all/run/run-all/backfill/pending/export/...`
 
+## Ausgabepruefung und Quarantaene
+
+Chats, Mails und Anhaenge sind fremder Inhalt; eine darin versteckte
+Anweisung kann das Modell dazu bringen, sie ins Projektwissen zu schreiben,
+das spaeter Agenten und Chat-Projekte als Kontext lesen. Vor dem Schreiben
+prueft `guard.py` jede Modellantwort auf geheimnisaehnliche Zeichenketten
+(Schluessel, Tokens, der lokale Koeder `~/.config/polaris/canary`) und auf
+Anweisungen an eine KI oder Shell-Befehle. Bei einem Treffer wird nichts
+geschrieben; die Antwort liegt lokal (nie auf dem Laufwerk) unter
+`~/.local/state/polaris/quarantine/`, der Health Check meldet sie.
+
+    polaris-curator quarantine list          # angehaltene Antworten
+    polaris-curator quarantine show <id>     # Befund (volle Antwort mit --full)
+    polaris-curator quarantine release <id>  # nach Sichtung doch schreiben
+    polaris-curator quarantine drop <id>     # verwerfen
+
+Vor der Pruefung wird der Text normalisiert (Breit-/Sonderformen,
+unsichtbare Zeichen, aehnlich aussehende Buchstaben); unsichtbare
+Formatzeichen werden auch nie geschrieben. Dieselbe Pruefung gilt fuer die
+Plaene von Verdichtung, Neu-Einordnung und Aufraeumen der offenen Punkte
+(angehalten, nicht freigebbar; der naechste Lauf plant neu) und fuer
+Betreff, Absender und Dateinamen im Dokumentindex. Freigegebene Antworten
+behalten ihre Herkunft (per `retract` zuruecknehmbar). Zusaetzlich verbietet
+der Prompt, an Software gerichtete Aufforderungen, Befehle oder Zugangsdaten
+zu uebernehmen, und erfasst angebliche Aenderungen an Zahlungen,
+Bankverbindungen oder Zugaengen von aussen als "Verifizieren"-Punkt.
+
+Die Pruefung erkennt typische Muster, keine geschickt verschleierten; die
+eigentlichen Grenzen sind die Sandbox der Modell-CLI und die festen
+Ausgabefelder. Der Koeder funktioniert nur, solange `~/.config/polaris`
+nicht per `command_sandbox_ro` freigegeben wird.
+
 ## Konfiguration
 
 Global: `~/.config/polaris/curator.yaml` (wird beim ersten Lauf mit

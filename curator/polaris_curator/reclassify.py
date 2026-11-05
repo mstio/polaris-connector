@@ -247,6 +247,8 @@ def reclassify_project(project: Path, cfg, llm_fn, apply: bool = False) -> Recla
         if not candidates:
             return result
         plan = llm_fn(build_prompt(candidates), cfg, schema=RECLASSIFY_SCHEMA).data
+        from . import guard
+        guard.stop_if_suspicious(project, "Neu-Einordnung", plan, "reclassify", ReclassifyError, accepted_text=text)
         accepted, rejected = filter_plan(plan, candidates)
         result.notes = plan.get("notes")
         layout.ensure_polaris_dir(project)

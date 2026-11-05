@@ -19,6 +19,7 @@ verwaist im Dokument stehen.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,9 @@ def clean(value: Any) -> str:
     und ein "<!-- polaris-source ... -->" im Text wirkte wie eine echte
     Herkunft - retract haette ein fremdes Batch entfernt (Review 2026-09-29)."""
     text = "" if value is None else str(value)
+    # Unsichtbare Formatzeichen (Nullbreite u. Ae.) nie ins Wissen: sonst
+    # sehen Leser einen anderen Text als die Ausgabepruefung (2026-11-04).
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
     text = text.replace("<!--", "‹!--").replace("-->", "→")
     return _WS_RE.sub(" ", text).strip()
 

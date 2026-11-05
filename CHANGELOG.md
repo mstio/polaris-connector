@@ -37,6 +37,16 @@ verlangen. Einzelheiten stehen in der README.
   - Radar: fremde Links, Kennungen, Daten und Versionen werden streng geprüft;
     Benachrichtigungen maskieren Markup, das Widget zeigt Fremdtext nur als
     reinen Text.
+- Ausgabeprüfung: Modellantworten mit geheimnisähnlichem Text, dem lokalen
+  Köder (`~/.config/polaris/canary`, wird beim ersten Lauf angelegt) oder
+  Anweisungen an eine KI bzw. Shell-Befehlen werden nicht geschrieben, sondern
+  lokal in Quarantäne gelegt (`polaris-curator quarantine list|show|release|drop`);
+  der Health Check meldet sie. Die Prüfung normalisiert Unicode-Tricks
+  (Nullbreite, ähnliche Buchstaben, Breitformen), gilt auch für Verdichtung,
+  Neu-Einordnung, Aufräumen offener Punkte und den Dokumentindex; der Prompt
+  verbietet an Software gerichtete Aufforderungen, Befehle und Zugangsdaten
+  und erfasst angebliche Änderungen an Zahlungen/Bankverbindungen von außen
+  als „Verifizieren“-Punkt.
 - Agentenleitfaden: Updates erst nach Blick des Nutzers auf die neuen Commits
   einspielen; Spiegel nie blind zurückholen.
 - Das Widget gibt es auch als eigenes Plugin-Repo `mstio/mst.polaris-curator`

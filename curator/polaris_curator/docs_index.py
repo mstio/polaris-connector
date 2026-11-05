@@ -38,7 +38,20 @@ def _decode(value: str | None) -> str:
         text = str(email.header.make_header(email.header.decode_header(value)))
     except (LookupError, ValueError, UnicodeDecodeError):
         text = value
-    return " ".join(text.split()).replace("|", "/")
+    return _safe(" ".join(text.split()).replace("|", "/"))
+
+
+def _safe(text: str, limit: int = 160) -> str:
+    """Betreff/Absender/Dateinamen sind Fremdtext und landen als Ueberschrift
+    im Index, den Agenten lesen: unsichtbare Zeichen weg, Markdown-Zeichen am
+    Anfang entschaerft, gekuerzt; Verdachtstext ersetzt (2026-11-04)."""
+    from . import guard
+    from .merge import clean
+
+    t = clean(text).lstrip("#>*-+` ")[:limit]
+    if guard.scan_text(t):
+        return "[Text entfernt: Verdacht auf Anweisung oder Geheimnis]"
+    return t
 
 
 def _mail_headers(path: Path) -> dict[str, str]:
@@ -88,19 +101,19 @@ def build_index(project: Path) -> str:
         lines += ["_Keine._", ""]
     for mail in mails:
         h = _mail_headers(mail)
-        title = h.get("Subject") or mail.stem
+        title = h.get("Subject") or _safe(mail.stem)
         meta = ", ".join(x for x in (h.get("From"), h.get("Date")) if x)
         lines.append(f"### {title}")
         if meta:
             lines.append(meta)
-        lines.append(f"- Mail: `{_rel(project, mail)}`")
+        lines.append(f"- Mail: `{_safe(_rel(project, mail), 300).replace('`', '')}`")
         att_dir = att_root / mail.stem
         handling = _handling_by_file(st, mail.name)
         files = sorted(p for p in att_dir.iterdir() if p.is_file()) if att_dir.is_dir() else []
         for att in files:
             h = handling.get(att.name, "")
             label = _HANDLING_LABEL.get(h, h if h.startswith("identisch mit") else "abgelegt")
-            lines.append(f"- Anhang: `{_rel(project, att)}` – {label}")
+            lines.append(f"- Anhang: `{_safe(_rel(project, att), 300).replace('`', '')}` – {label}")
         lines.append("")
 
     lines += ["## Dokumente und Notizen", ""]

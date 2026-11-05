@@ -357,6 +357,8 @@ def compact_project(project: Path, cfg, llm_fn, dry_run: bool = False) -> Compac
         return result
     llm_result = llm_fn(build_prompt(entries), cfg, schema=COMPACT_SCHEMA)
     plan = llm_result.data
+    from . import guard
+    guard.stop_if_suspicious(project, "Verdichtung", plan, "compact", CompactionError, accepted_text=text)
     result.plan = plan
     result.notes = plan.get("notes")
     result.rejected = drop_lossy_merges(plan, entries) + drop_bad_superseded(plan, entries)

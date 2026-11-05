@@ -346,6 +346,8 @@ EN: dict[str, str] = {
         'mirror on hold: not restored during installation – decide (polaris-memory-mirror)',
     '{file}: unlesbar ({error}) - Projekt-Override ignoriert':
         '{file}: unreadable ({error}) - project override ignored',
+    '{n} Antwort(en) in Quarantäne – polaris-curator quarantine list':
+        '{n} response(s) in quarantine – polaris-curator quarantine list',
     '{file}: nicht erlaubte Schluessel ignoriert ({keys}) - Laufzeit, Befehl und Modell nur in der lokalen curator.yaml':
         '{file}: disallowed keys ignored ({keys}) - runtime, command and model only in the local curator.yaml',
     'curator.yaml: language muss de oder en sein (gefunden: {value}) - bis zur Korrektur gilt de':

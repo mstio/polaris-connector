@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import context as context_mod
+from . import guard as guard_mod
 from . import llm as llm_mod
 from . import review as review_mod
 from . import batching, change_schema, storage, chatgpt_source, documents_source, integrity, journal, layout, locking, merge, state as state_mod
@@ -310,6 +311,15 @@ def _provenance_for_document(project: Path, doc, archive_path: Path) -> str:
     )
 
 
+def _safe_note(text: str) -> str:
+    """Modelltext, der in Protokolle und den Projektstatus (auf dem Laufwerk)
+    gelangt: gekuerzt, einzeilig, bei Verdacht unterdrueckt (2026-11-04)."""
+    from .merge import clean
+
+    t = clean(text)[:200]
+    return "(Notiz unterdrückt: Verdacht auf Anweisung oder Geheimnis)" if guard_mod.scan_text(t) else t
+
+
 def run_project(
     project: Path,
     cfg: CuratorConfig,
@@ -506,7 +516,7 @@ def run_project(
             try:
                 change = change_schema.validate_change_object(result.data)
             except change_schema.ChangeValidationError as exc:
-                msg = f"Aenderungsobjekt ungueltig bei {item.label}: {exc}"
+                msg = f"Aenderungsobjekt ungueltig bei {item.label}: {_safe_note(str(exc))}"
                 logger.error(msg)
                 report.errors.append(msg)
                 _record_failure(st, item.key, msg)
@@ -515,7 +525,7 @@ def run_project(
 
             failed_checks = change_schema.failed_self_review_checks(change)
             if failed_checks:
-                note = (change.get("self_review") or {}).get("notes") or ""
+                note = _safe_note((change.get("self_review") or {}).get("notes") or "")
                 msg = (
                     f"Self-Review nicht bestanden bei {item.label}: {', '.join(failed_checks)}"
                     + (f" ({note})" if note else "")
@@ -596,6 +606,38 @@ def run_project(
                     upd["mode"] = "append"
                     upd["replaces_id"] = None
                     report.warnings.append(f"{item.label}: {rid} nur im Verzeichnis gesehen - neuer Eintrag statt Abloesung")
+
+            # Ausgabepruefung (2026-11-04): Geheimnis-, Koeder- oder
+            # anweisungsaehnlicher Text wird nicht geschrieben, sondern lokal
+            # in Quarantaene gelegt; der Schritt gilt als erledigt.
+            try:
+                guard_mod.ensure_canary()
+            except OSError:
+                pass
+            guard_findings = guard_mod.scan(change)
+            if guard_findings:
+                try:
+                    # Herkunft wie beim normalen Schreiben mitgeben, damit eine
+                    # Freigabe spaeter per retract zuruecknehmbar bleibt.
+                    if callable(provenance):
+                        prov_str = provenance(list(item.chat_batch.message_ids))
+                    else:
+                        prov_str = str(provenance)
+                    qpath = guard_mod.quarantine(project, item.label, change, guard_findings,
+                                                 meta={"kind": item.kind, "provenance": prov_str})
+                    kinds = ", ".join(sorted({f["kind"] for f in guard_findings}))
+                    report.warnings.append(f"Quarantäne {item.label}: {kinds} – nichts geschrieben "
+                                           f"({qpath.stem}); der Nutzer prüft mit polaris-curator quarantine show")
+                    logger.warning("Antwort in Quarantaene: %s (%s)", qpath, kinds)
+                except OSError as exc:
+                    msg = f"Quarantaene fuer {item.label} nicht moeglich: {exc}"
+                    logger.error(msg)
+                    report.errors.append(msg)
+                    _record_failure(st, item.key, msg)
+                    state_mod.save_state(project, st)
+                    continue
+                change = guard_mod.empty_like(change)
+                findings = []
 
             try:
                 merge_result = merge.apply_change_object(project, change, provenance, writer=_journaled_write)

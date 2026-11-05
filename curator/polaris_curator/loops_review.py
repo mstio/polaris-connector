@@ -141,6 +141,9 @@ def review(project: Path, cfg, llm_fn, dry_run: bool = False) -> ReviewResult:
     decisions = layout.decisions_path(project).read_text(encoding="utf-8") if layout.decisions_path(project).is_file() else ""
     prompt = build_prompt(loops, knowledge, decisions, getattr(cfg, "full_context_chars", 80000))
     plan = llm_fn(prompt, cfg, schema=SCHEMA).data
+    from . import guard
+    guard.stop_if_suspicious(project, "Offene Punkte prüfen", plan, "loops-review", LoopsReviewError,
+                             accepted_text="\n".join((text, knowledge, decisions)))
     result.notes = plan.get("notes")
     accepted, result.rejected = validate(plan, {lid for lid, _b in loops}, knowledge, decisions)
     if not accepted:

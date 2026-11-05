@@ -228,6 +228,13 @@ def check_curation(projects: dict, now: datetime | None = None) -> dict:
             repeated = []
         if repeated:
             problems.append(t("{name}: {n} Einheit(en) scheitern wiederholt", name=path.name, n=len(repeated)))
+    try:
+        from . import guard
+        nq = len(guard.entries())
+    except Exception:  # noqa: BLE001 - nur Anzeige
+        nq = 0
+    if nq:
+        problems.insert(0, t("{n} Antwort(en) in Quarantäne – polaris-curator quarantine list", n=nq))
     if problems:
         uniq = list(dict.fromkeys(problems))
         return _c("curation", label, "warn", " · ".join(uniq[:3]) + (f" (+{len(uniq) - 3})" if len(uniq) > 3 else ""))

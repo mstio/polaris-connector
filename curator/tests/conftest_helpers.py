@@ -44,6 +44,11 @@ from polaris_curator import journal as _journal  # noqa: E402
 # schreiben lassen (vorher blieben Test-Journale im echten Verzeichnis liegen).
 _JOURNAL_DIR = Path(tempfile.mkdtemp(prefix="polaris-curator-journals-"))
 _journal.journal_dir = lambda: _JOURNAL_DIR
+# Quarantaene und Koeder (guard.py, seit 2026-11-04) nie im echten Home.
+from polaris_curator import guard as _guard  # noqa: E402
+
+_guard.QUARANTINE_DIR = Path(tempfile.mkdtemp(prefix="polaris-curator-quarantine-"))
+_guard.CANARY_FILE = Path(tempfile.mkdtemp(prefix="polaris-curator-canary-")) / "canary"
 
 
 class TempProject:
