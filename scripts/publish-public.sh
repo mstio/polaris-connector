@@ -4,7 +4,8 @@
 # Das private Repo behaelt die volle Historie; der Spiegel bekommt je Freigabe
 # genau einen Commit mit dem Dateistand von <ref>, ohne dessen Historie und
 # ohne Binaerpakete (dist/*.xpi, *.tar.gz, *.zip). Vorher laeuft
-# scripts/privacy-check.py; bei einem Treffer wird nichts uebernommen.
+# scripts/privacy-check.py; bei einem Treffer wird nichts uebernommen. Vorher
+# laufen scripts/check-sync.sh und alle Tests (scripts/run-tests.sh, seit 2026-11-05).
 # Ohne --push wird nur lokal committet; pruefen, dann erneut mit --push.
 # Spiegel-Arbeitskopie: $PUBLIC_DIR (Standard ~/Projects/polaris-public).
 #
@@ -38,6 +39,7 @@ SHA="$(git rev-parse --verify "$REF^{commit}")"
 # Vorlagen (memlint, Skills, allgemeine Agentenregeln) im Gleichstand mit den
 # Live-Fassungen? (seit 2026-11-04, vorher in make-bundle.sh)
 "$REPO/scripts/check-sync.sh" || { echo "FEHLER: Vorlagen veraltet - nichts veroeffentlicht." >&2; exit 1; }
+"$REPO/scripts/run-tests.sh" || { echo "FEHLER: Tests rot - nichts veroeffentlicht." >&2; exit 1; }
 [ -d "$PUBLIC_DIR/.git" ] || { echo "FEHLER: kein Spiegel unter $PUBLIC_DIR (git clone des oeffentlichen Repos)." >&2; exit 1; }
 if [ -n "$(git -C "$PUBLIC_DIR" status --porcelain)" ]; then
   echo "FEHLER: $PUBLIC_DIR hat uncommittete Aenderungen." >&2; exit 1

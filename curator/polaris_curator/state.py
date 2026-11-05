@@ -49,7 +49,6 @@ class CuratorState:
     fed_paragraphs: dict[str, list[str]] = field(default_factory=dict)
     # Einmalige Festschreibung von processed_revisions fuer aeltere Laeufe
     # (vorher Rueckfall ueber die wandernde Zeitgrenze last_successful_run, F2).
-    coverage_migrated: bool = False
     # Grosse Dokumente in Teilen (seit 2026-10-07): state_key -> {hash, done,
     # parts}. Erst nach dem letzten Teil wird die Datei archiviert und unter
     # processed_files vermerkt.
@@ -101,7 +100,6 @@ def load_state(project: Path) -> CuratorState:
         processed_revisions=raw.get("processed_revisions", {}) or {},
         retracted_ids=set(raw.get("retracted_ids", []) or []),
         fed_paragraphs=raw.get("fed_paragraphs", {}) or {},
-        coverage_migrated=bool(raw.get("coverage_migrated", False)),
         document_parts=raw.get("document_parts", {}) or {},
     )
     for day, entry in (raw.get("daily_batches") or {}).items():
@@ -129,7 +127,6 @@ def save_state(project: Path, state: CuratorState) -> None:
         "processed_revisions": state.processed_revisions,
         "retracted_ids": sorted(state.retracted_ids),
         "fed_paragraphs": state.fed_paragraphs,
-        "coverage_migrated": state.coverage_migrated,
         "document_parts": state.document_parts,
         "daily_batches": {
             day: {"status": b.status, "processed_message_ids": b.processed_message_ids}

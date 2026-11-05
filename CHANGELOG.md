@@ -8,6 +8,24 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Entschlackt (2026-11-05):** alte Migration der Curator-Zustände aus
+  September (`legacy_migration`, Feld `coverage_migrated`), Journale am alten
+  Ort auf dem Laufwerk (bis 10.10.), toter Code (`guard.strip_invisible`,
+  `ids.ID_RE`) und die Machbarkeitsstudie `experiments/agent-runtime-poc`
+  (archiviert im Tag `archiv/agent-runtime-poc-20261105`) entfernt.
+  Wer Polaris vor dem 10.10.2026 zuletzt laufen ließ: erst auf den Stand
+  `3e89a3e` aktualisieren und einen Curator-Lauf abwarten.
+  `scripts/publish-public.sh` startet jetzt alle Tests (`scripts/run-tests.sh`).
+- **Nutzungszähler (2026-11-05):** Der Curator zählt lokal, wie oft welcher
+  Befehl und welche Funktion (Verdichtung, Schleifenprüfung, Prüfer) läuft:
+  `~/.local/state/polaris/usage.json`, nur Name, Anzahl, erstes/letztes Datum,
+  nie Inhalte. Grundlage, um Ungenutztes mit Beleg zu entfernen.
+- **Sicherheitswerkzeuge im Maschinengedächtnis (2026-11-05):** `install.sh`
+  legt `claude-guard-hook.py`, `claude-guard-einschalten.sh` und
+  `home-snapshots-einrichten.sh` nach `~/.config/ai-agents/tools/`, schaltet
+  aber nichts ein (Hook für Claude Code gegen versteckte Anweisungen aus Mails
+  und Webseiten; stündliche, für Agenten unerreichbare Snapshots von `/home`).
+  Einzelheiten: `memory/README.md`.
 - **Sicherheit (Prüfung vom 2026-11-04, Grundsatz „never trust your input“):**
   - `<Projekt>/.polaris/curator-config.yaml` darf nur noch `batching`, `budget`,
     `context`, `monitoring`, `compaction` und `attachments` setzen. Laufzeit,

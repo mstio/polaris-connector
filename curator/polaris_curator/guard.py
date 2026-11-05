@@ -124,12 +124,6 @@ def normalize(text: str) -> str:
     return t.translate(_CONFUSABLES)
 
 
-def strip_invisible(text: str) -> str:
-    """Unsichtbare Formatzeichen (z. B. Nullbreite) entfernen, bevor Text
-    geschrieben wird; Leser sollen sehen, was dasteht."""
-    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
-
-
 def scan_text(text: str) -> list[dict]:
     """Befunde in einem einzelnen Text (fuer Indexzeilen, Notizen u. Ae.)."""
     return scan({"text": text})

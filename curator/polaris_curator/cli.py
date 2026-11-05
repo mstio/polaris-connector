@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as config_mod
+from . import usage
 from . import documents_source, pipeline, state as state_mod, storage
 from .config import CuratorConfig
 from .i18n import language, t
@@ -896,6 +897,7 @@ def cmd_retract(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    usage.count(f"cli:{args.command}")
     return args.func(args)
 
 

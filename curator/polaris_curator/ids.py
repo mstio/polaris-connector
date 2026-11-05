@@ -35,7 +35,6 @@ from . import merge
 # **ID**-Feld in decisions.md) und nie innerhalb eines Code-Blocks - sonst
 # galt z. B. "Kunden-ID: K7" im Fliesstext als Nummer (Review 2026-09-29).
 ID_LINE_RE = re.compile(r"^\s+- ID: ([KL]\d+)(?=\s|$)")
-ID_RE = ID_LINE_RE  # Rueckwaertskompatibel fuer Aufrufer
 _DECISION_ID_RE = re.compile(r"^\*\*ID\*\*[ \t]*\n(D\d+)[ \t]*$", re.M)
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # Fuer den Zaehler zaehlt jede Erwaehnung einer Nummer in einem

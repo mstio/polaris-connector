@@ -341,14 +341,6 @@ def run_project(
         layout.ensure_inbox_dirs(project)
 
         st = state_mod.load_state(project)
-        if not st.coverage_migrated:
-            # Einmalig, VOR dem Fortsetzen eines Journals (Review Runde 5, F2).
-            revisions, fed = chatgpt_source.legacy_migration(project, st)
-            st.processed_revisions.update(revisions)
-            for mid, keys in fed.items():
-                st.fed_paragraphs.setdefault(mid, keys)
-            st.coverage_migrated = True
-            state_mod.save_state(project, st)
         # Unterbrochenen Schritt eines frueheren Laufs vollenden (journal.py).
         if not _finish_interrupted_step(project, st, cfg, report, logger):
             return report

@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from . import usage
 from . import layout, merge, storage
 from .change_schema import CONFIDENCES, ENTRY_TYPES, EVIDENCE_STRENGTHS, SCOPES
 
@@ -348,6 +349,7 @@ def drop_bad_superseded(plan: dict, entries: list[Entry]) -> list[str]:
 
 
 def compact_project(project: Path, cfg, llm_fn, dry_run: bool = False) -> CompactionResult:
+    usage.count("compact")
     kpath = layout.knowledge_path(project)
     text = kpath.read_text(encoding="utf-8")
     _, _, entries = parse_entries(text)

@@ -101,7 +101,6 @@ class TestJournal(unittest.TestCase):
             tp.write_message("m1")
             cfg = fast_config()
             st0 = state_mod.CuratorState()
-            st0.coverage_migrated = True  # Migration schon erledigt (sonst trifft der Patch sie)
             state_mod.save_state(project, st0)
             with patch.object(state_mod, "save_state", side_effect=RuntimeError("kill")):
                 with self.assertRaises(RuntimeError):

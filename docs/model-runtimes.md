@@ -22,9 +22,8 @@ health check says so (line "Model"). The evaluation
 of an exchangeable agent runtime is in
 [`docs/agent-runtime-evaluation.md`](agent-runtime-evaluation.md), the
 decision in [`docs/adr/001-agent-runtime.md`](adr/001-agent-runtime.md),
-an isolated proof of concept in
-[`experiments/agent-runtime-poc/`](../experiments/agent-runtime-poc/README.md)
-(German).
+an isolated proof of concept was archived on 2026-11-05 in the private
+repo's git tag `archiv/agent-runtime-poc-20261105` (German).
 
 ---
 

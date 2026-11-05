@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
+from . import usage
 from . import context, ids, layout, merge, storage
 
 MIN_OPEN = 15
@@ -129,6 +130,7 @@ def validate(plan: dict, open_ids: set[str], knowledge: str, decisions: str) -> 
 
 
 def review(project: Path, cfg, llm_fn, dry_run: bool = False) -> ReviewResult:
+    usage.count("loops_review")
     lpath = layout.open_loops_path(project)
     if not lpath.is_file():
         return ReviewResult()

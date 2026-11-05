@@ -9,6 +9,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -263,6 +264,10 @@ class TestEntrypointsConf(unittest.TestCase):
             f"{self.home}/agent-b/AGENTS.md AGENTS.md  # Ordner da, Link fehlt",
             f"{self.home}/agent-c/AGENTS.md AGENTS.md  # Agent nicht eingerichtet",
         ]) + "\n")
+        # Einstiege muessen unter $HOME liegen (seit 2026-11-04).
+        p = unittest.mock.patch.object(Path, "home", return_value=self.home)
+        p.start()
+        self.addCleanup(p.stop)
 
     def errors_for(self):
         r = memlint.lint(self.m.root, system=True)
@@ -322,6 +327,9 @@ class TestPatternsAndSkills(unittest.TestCase):
 
     def test_skill_links_per_agent_dir(self):
         home = Path(tempfile.mkdtemp())
+        p = unittest.mock.patch.object(Path, "home", return_value=home)
+        p.start()
+        self.addCleanup(p.stop)
         (home / "agent-a" / "skills").mkdir(parents=True)
         self.skill("gut", "---\nname: gut\ndescription: x\n---\n")
         self.m.write("entrypoints.conf", f"{home}/agent-a/skills/  skills/\n{home}/agent-b/skills/  skills/\n")

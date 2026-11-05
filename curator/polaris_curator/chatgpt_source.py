@@ -136,67 +136,6 @@ def paragraph_hash(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
-def legacy_migration(project: Path, state) -> tuple[dict[str, int], dict[str, list]]:
-    """Einmalige Migration aelterer States (Review Runden 5/6).
-
-    Frueher kamen alle Fassungen einer noch unverarbeiteten Nachricht in einen
-    Batch - die ID steht dann je Fassung einmal in derselben Herkunftsliste.
-    Spaeter eingetroffene Fassungen einer schon verarbeiteten Nachricht sah das
-    Modell nie. Daraus:
-    - eingefrorene Fassung = wie oft die ID in EINER Herkunftsliste steht
-      (mindestens 1); keine Zeitgrenze.
-    - Die gesendeten Absaetze werden ausdruecklich festgeschrieben (Absaetze der
-      Fassungen bis dahin) - danach gibt es keinen impliziten "alles
-      gesendet"-Zustand mehr, den spaetere Aufrufe mit [] ueberschreiben
-      koennten (Review Runde 6, F1).
-    - Verarbeitet, aber in keiner Herkunftsangabe: hat nichts beigetragen ([])."""
-    revisions: dict[str, int] = {}
-    fed: dict[str, list] = {}
-    # Je unterschiedlicher Herkunftsliste (= ein Batch) zaehlen, wie oft die ID
-    # vorkommt, und ueber alle Batches aufsummieren: der alte Code verteilte
-    # Fassungen einer Nachricht auch auf mehrere Tages-/Teil-Batches (Review
-    # Runde 7). Dieselbe Liste an mehreren Eintraegen zaehlt nur einmal.
-    per_list_max: dict[str, int] = {}
-    lists: set[str] = set()
-    for name in ("knowledge.md", "decisions.md", "open-loops.md", "knowledge-archiv.md"):
-        path = project / name
-        if not path.is_file():
-            continue
-        text = path.read_bytes().decode("utf-8", errors="replace")  # kaputtes Byte: kein Abbruch
-        # Je Herkunftsangabe der ganze Batch (batch_ids, seit 2026-09-29),
-        # sonst message_ids - Teilmengen je Aussage sind keine eigenen Batches.
-        for src in re.finditer(r"<!-- polaris-source:(.*?)-->", text):
-            m = re.search(r"\bbatch_ids=(\S+)", src.group(1)) or re.search(r"\bmessage_ids=(\S+)", src.group(1))
-            if m:
-                lists.add(m.group(1).rstrip("-"))
-    for lst in lists:
-        for i in lst.split(","):
-            if i:
-                per_list_max[i] = per_list_max.get(i, 0) + 1
-    files_of: dict[str, list[tuple[int, str]]] = {}
-    for _src, directory in layout.chat_messages_dirs(project):
-        if not directory.is_dir():
-            continue
-        for path in directory.glob("*.json"):
-            msg = load_message(path)
-            if msg is None or not state.is_message_processed(msg.message_id):
-                continue
-            files_of.setdefault(msg.message_id, []).append((_revision_number(path), msg.content))
-    for mid, files in files_of.items():
-        if mid not in state.processed_revisions:
-            revisions[mid] = max(1, min(per_list_max.get(mid, 1), max(r for r, _c in files)))
-        if mid in state.fed_paragraphs:
-            continue
-        if mid not in per_list_max:
-            fed[mid] = []
-            continue
-        done = revisions.get(mid, int(state.processed_revisions.get(mid, 1)))
-        fed[mid] = sorted({
-            paragraph_hash(_comparable(p)) for r, content in files if r <= done for p in _paragraphs(content)
-        })
-    return revisions, fed
-
-
 @dataclass
 class Absorbed:
     """Ohne Modellaufruf als verarbeitet zu vermerken (Inhalt schon abgedeckt)."""

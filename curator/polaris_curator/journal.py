@@ -54,17 +54,10 @@ def path(project: Path) -> Path:
     return journal_dir() / f"{safe}-{key}.json"
 
 
-def legacy_path(project: Path) -> Path:
-    """Frueherer Ort auf dem Drive-Mount (bis 2026-10-10)."""
-    return layout.polaris_dir(project) / NAME
-
-
 def existing_path(project: Path) -> Path | None:
-    """Pfad eines offenen Journals (lokal vor altem Ort) oder None."""
-    for p in (path(project), legacy_path(project)):
-        if p.is_file():
-            return p
-    return None
+    """Pfad eines offenen Journals oder None."""
+    p = path(project)
+    return p if p.is_file() else None
 
 
 def _sha(text: str | None) -> str | None:
@@ -101,9 +94,7 @@ def write_files(project: Path, files: dict[str, tuple[str | None, str]]) -> None
 
 
 def finish(project: Path) -> None:
-    for p in (path(project), legacy_path(project)):
-        if p.exists():
-            p.unlink()
+    path(project).unlink(missing_ok=True)
 
 
 def pending(project: Path) -> dict[str, Any] | None:

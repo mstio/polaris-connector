@@ -239,6 +239,14 @@ bisherigen State erneut - kann zu redundanten Eintraegen in `knowledge.md`
 fuehren, wenn diese bereits kuratiert wurden. Nur bewusst einsetzen, z.B.
 nach einem gewollten Reset der kuratierten Dateien.
 
+## Nutzungszähler (seit 2026-11-05)
+
+`polaris_curator/usage.py` zählt lokal in `~/.local/state/polaris/usage.json`,
+wie oft jeder CLI-Befehl (`cli:<befehl>`) und die Funktionen `compact`,
+`loops_review` und `reviewer` laufen: nur Name, Anzahl, erstes und letztes
+Datum, nie Inhalte, Projekte oder Pfade. Zweck: ungenutzten Code mit Beleg
+entfernen. Tests schalten ihn mit `POLARIS_USAGE_OFF=1` ab.
+
 ## Health-Check und Überwachung (seit 2026-09-25)
 
 `polaris-curator health [--json]` prüft die selbst gebauten Bausteine
@@ -373,8 +381,8 @@ Eintraege woertlich in `.polaris/retracted/<zeit>.md`.
   uebergangen.
 - **Write-Ahead-Journal** (lokal unter `~/.local/state/polaris/journals/`,
   bis 2026-10-10 `.polaris/journal.json` auf dem Drive-Mount - dort ging das
-  Loeschen verloren und ein Rest sperrte das Projekt; ein Journal am alten Ort
-  wird weiter vollendet bzw. verworfen): Zielzustand aller
+  Loeschen verloren und ein Rest sperrte das Projekt; der alte Ort wird seit
+  2026-11-05 nicht mehr gelesen): Zielzustand aller
   Dateien und State-Aenderung vor dem Schreiben; ein unterbrochener Schritt
   wird beim naechsten Lauf vollendet. Passt eine Datei nicht mehr (jemand hat
   sie anders geaendert) oder ist das Journal beschaedigt, wird das Projekt

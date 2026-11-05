@@ -3,13 +3,9 @@
 <!-- Vorlage aus dem Polaris-Installationspaket. An den eigenen Rechner anpassen. -->
 
 ## Struktur dieses Wissensbestands
-- Diese Datei (`~/.config/ai-agents/AGENTS.md`) ist die alleinige Source of Truth für die Arbeitsweise aller lokalen Agenten, unabhängig vom Anbieter.
-- Einstiege der Agenten: `~/.config/ai-agents/entrypoints.conf`, eine Zeile je Agent.
-  - Jeder Einstieg ist ein Symlink auf diese Datei, ohne eigenen Inhalt.
-  - `python3 ~/.config/ai-agents/tools/memlint.py --link` legt fehlende Einstiege für eingerichtete Agenten an und ersetzt nie eine vorhandene Datei.
-  - Neuer Agent: erst belegen, welche globale Anweisungsdatei er liest, dann dort eintragen.
-- Änderungen über einen Einstieg oder direkt an dieser Datei vornehmen; alle Agenten sehen sie sofort.
-- Das **Maschinengedächtnis** dokumentiert den konkreten Zustand dieses Rechners (Hardware, aktive Entscheidungen, offene Punkte): Index `~/.config/ai-agents/AI_HANDOFF.md`, Themen unter `~/.config/ai-agents/handoff/*.md`. Regeln im Abschnitt „Maschinengedächtnis“.
+- Diese Datei (`~/.config/ai-agents/AGENTS.md`) ist die alleinige Source of Truth für die Arbeitsweise aller lokalen Agenten, unabhängig vom Anbieter. Jeder Agent liest sie über einen Symlink ohne eigenen Inhalt (Liste: `entrypoints.conf`, eine Zeile je Agent). `python3 ~/.config/ai-agents/tools/memlint.py --link` legt fehlende Einstiege an und ersetzt nie eine vorhandene Datei; neuer Agent: erst belegen, welche globale Anweisungsdatei er liest, dann dort eintragen.
+- Änderungen über einen Einstieg oder direkt an dieser Datei; alle Agenten sehen sie sofort.
+- Das **Maschinengedächtnis** dokumentiert den konkreten Zustand dieses Rechners: Index `~/.config/ai-agents/AI_HANDOFF.md`, Themen unter `handoff/*.md`. Regeln im Abschnitt „Maschinengedächtnis“.
 - Low-Level-Incidents (Boot, Treiber, Suspend/Hibernate usw.) stehen unter `~/.config/ai-agents/system-history/`. Vor Änderungen in diesen Bereichen dort nachlesen: nicht blind wiederherstellen, aber in die Analyse einbeziehen und gegen den aktuellen Zustand prüfen.
 
 ## Polaris auf diesem Rechner
@@ -94,38 +90,17 @@
 - Lässt sich die Dokumentation nicht schreiben oder prüfen: dem Nutzer ausdrücklich als offenen Punkt melden, den Eingriff nicht als abgeschlossen darstellen.
 
 ## Maschinengedächtnis (gemeinsam für alle Agenten)
-- Kern der lokalen Anpassungen: Markdown-Dateien unter `~/.config/ai-agents/` (diese `AGENTS.md`, Index `AI_HANDOFF.md`, `handoff/`, `knowledge/`, `history/`, Incidents `system-history/`) plus Prüfwerkzeug `tools/memlint.py`. Alle lokalen Agenten lesen und schreiben es; das private Gedächtnis einzelner Agenten ersetzt es nicht.
-- **Menschenlesbarkeit (nicht verhandelbar):**
-  - Die Markdown-Dateien sind die einzige kanonische Quelle, lesbar mit normalem Editor und normaler Dateisuche, auch ohne Polaris, Claude, Codex oder andere Spezialsoftware.
-  - Status und Herkunft stehen im Klartext (Überschrift, „Ersetzt durch:“) und zusätzlich als einzeilige Kommentarzeile.
-  - Datenbanken, Vektor-/Graph-Indizes, MCP-Server o. Ä. sind höchstens wegwerfbare Zugriffsschichten, nie Voraussetzung zum Lesen oder Wiederherstellen.
-- **Drei Schichten pro Thema** (gleicher Dateiname):
-  - `handoff/<thema>.md`: nur **aktueller** Stand, Architekturüberblick, Leitplanken, offene Punkte, Verweise (Richtgröße 3–8 KB)
-  - `knowledge/<thema>.md`: dauerhaftes Wissen (Architektur, Entscheidungen, Fallstricke, Verfahren) mit Status
-  - `history/<thema>.md`: abgeschlossene Episoden und Chroniken, wörtlich
-  - Low-Level-Incidents bleiben in `system-history/`.
-  - **Der Handoff ist kein Archiv:** Was in `history/` oder `knowledge/` steht, dort nur verweisen, nicht zurückkopieren.
-- **Kennzeichnung (mem-Tag):** Jeder `##`-Abschnitt in `knowledge/`, `history/` und `handoff/` trägt direkt unter der Überschrift genau eine Zeile `<!-- mem: id=<eindeutige-id> type=<current_state|architecture|decision|gotcha|procedure|open_item|incident|history|pattern> status=<current|superseded|deprecated|historical|done> date=YYYY-MM-DD source=<user|agent-name|migration> ref=<commit:…,file:…,url:…,history:<id>,mem:<id>> [supersedes=<id>] [superseded_by=<id>] -->`. `source`/`ref` belegen die Herkunft (wie die `polaris-source`-Kommentare des Curators); keine Geheimnisse in Tags.
-- **Überholtes ablösen, nicht überschreiben:**
-  - Der alte Abschnitt bleibt in `knowledge/`, bekommt `status=superseded superseded_by=<neue-id>`, die Überschrift „Veraltet: …“ und darunter „**Ersetzt durch:** …“.
-  - Der neue Abschnitt trägt `supersedes=<alte-id>`.
-  - Ohne Nachfolger: `deprecated`, Überschrift „Abgekündigt: …“.
-  - Im Handoff steht nur `status=current`. Im Zweifel nach `history/` oder `knowledge/` verschieben statt löschen.
-- **Prüfen:** Nach jeder Änderung `python3 ~/.config/ai-agents/tools/memlint.py` (Exit 0 = keine Fehler; prüft Einstiege, Verweise, Tags, Ablösungen, Rückkopien in den Handoff, Klartext-Geheimnisse, Backup-Abdeckung, Größe). Der Health Check zeigt dasselbe als Zeile „Maschinengedächtnis“.
-- **Lesen:** Vor jeder Aufgabe, die den Rechner verändert (Konfiguration, Pakete, Dienste, Treiber, Desktop, Rechte), den Index `~/.config/ai-agents/AI_HANDOFF.md` vollständig lesen, seine **kritischen Regeln befolgen** (Vorrang vor eigenen Annahmen), dann die passende Themendatei lesen.
-- **Schreiben:**
-  - aktueller Stand → `handoff/<thema>.md` (Abschnitte anpassen statt Chronik anhängen)
-  - dauerhafte Erkenntnisse → eigener Abschnitt in `knowledge/<thema>.md`
-  - Episode (Anlass, Vorher/Nachher, Prüfung, Rückbau) → neuer Abschnitt am Ende von `history/<thema>.md`
-  - Kleine Themen dürfen alles im Handoff halten, solange er die Richtgröße einhält.
-  - Kein passendes Thema → neue Themendatei, im Index eintragen.
-  - Statusänderung oder neue kritische Regel („X nie tun, weil Y“) → Indexzeile bzw. „Kritische Regeln“ im selben Arbeitsgang anpassen. Den Index kurz halten.
-- **Zeitpunkt:** Direkt nach jedem abgeschlossenen persistenten Einzeleingriff dokumentieren, nicht gesammelt am Ende einer Serie (sonst gehen bei Unterbrechungen Schritte verloren).
-- **Nachweis gegenüber dem Nutzer:** Jede Abschlussmeldung zu einem persistenten Eingriff nennt die Dateien des Maschinengedächtnisses, in die dokumentiert wurde (z. B. „Maschinengedächtnis: `handoff/polaris.md`“), oder sagt ausdrücklich, dass nichts zu dokumentieren war.
-- **Sicherung:** Ist omarchy-backup eingerichtet, sichert es `~/.config/ai-agents/`.
-  - Gemeinsames Wissen nie außerhalb dieses Verzeichnisses ablegen.
-  - Dateien direkt dort bearbeiten, nicht über Symlinks mit `sed -i` o. Ä. (ersetzt den Symlink durch eine ungesicherte Kopie).
-  - Keine Dateien mit Endung `.sqlite` oder `.log` und keine mit `cache`, `token`, `secret` oder `credentials` im Namen anlegen; das Backup schließt sie aus.
+- Kern: Markdown-Dateien unter `~/.config/ai-agents/` (`AGENTS.md`, Index `AI_HANDOFF.md`, `handoff/`, `knowledge/`, `history/`, Incidents `system-history/`) plus `tools/memlint.py`. Alle lokalen Agenten lesen und schreiben es; das private Gedächtnis einzelner Agenten ersetzt es nicht.
+- **Menschenlesbar (nicht verhandelbar):** Die Markdown-Dateien sind die einzige kanonische Quelle, lesbar ohne Spezialsoftware. Datenbanken, Indizes, MCP-Server o. Ä. sind höchstens wegwerfbare Zugriffsschichten.
+- **Drei Schichten je Thema** (gleicher Dateiname): `handoff/` nur aktueller Stand (Richtgröße 3–8 KB, kein Archiv: nur verweisen), `knowledge/` dauerhaftes Wissen mit Status, `history/` abgeschlossene Episoden wörtlich.
+- **mem-Tag:** Jeder `##`-Abschnitt in diesen drei Ordnern trägt direkt darunter genau eine Zeile `<!-- mem: id=<eindeutige-id> type=<current_state|architecture|decision|gotcha|procedure|open_item|incident|history|pattern> status=<current|superseded|deprecated|historical|done> date=YYYY-MM-DD source=<user|agent-name|migration> ref=<commit:…,file:…,url:…,history:<id>,mem:<id>> [supersedes=<id>] [superseded_by=<id>] -->`; keine Geheimnisse in Tags.
+- **Überholtes ablösen, nicht überschreiben:** alter Abschnitt bleibt mit `status=superseded superseded_by=<neu>`, Überschrift „Veraltet: …“ und „**Ersetzt durch:** …“; der neue Abschnitt trägt `supersedes=<alt>`; ohne Nachfolger `deprecated`, „Abgekündigt: …“. Im Handoff nur `status=current`. Im Zweifel nach `history/` oder `knowledge/` verschieben statt löschen. Ausführlich: `knowledge/maschinengedaechtnis.md`, „Ausführliche Regeln aus AGENTS.md“ (falls vorhanden).
+- **Lesen:** Vor jeder Aufgabe, die den Rechner verändert (Konfiguration, Pakete, Dienste, Treiber, Desktop, Rechte), den Index vollständig lesen, seine **kritischen Regeln befolgen** (Vorrang vor eigenen Annahmen), dann die passende Themendatei.
+- **Schreiben:** aktueller Stand → `handoff/<thema>.md` (Abschnitte anpassen statt anhängen); dauerhafte Erkenntnis → `knowledge/`; Episode (Anlass, Vorher/Nachher, Prüfung, Rückbau) → `history/`. Statusänderung oder neue kritische Regel → Index im selben Arbeitsgang. Kein passendes Thema → neue Themendatei, im Index eintragen.
+- **Zeitpunkt:** direkt nach jedem abgeschlossenen persistenten Einzeleingriff, nicht gesammelt am Ende einer Serie.
+- **Prüfen:** nach jeder Änderung `python3 ~/.config/ai-agents/tools/memlint.py` (Exit 0 = keine Fehler).
+- **Nachweis:** Jede Abschlussmeldung zu einem persistenten Eingriff nennt die Dateien des Maschinengedächtnisses (z. B. „Maschinengedächtnis: `handoff/polaris.md`“) oder sagt ausdrücklich, dass nichts zu dokumentieren war.
+- **Sicherung:** Ist omarchy-backup eingerichtet, sichert es `~/.config/ai-agents/`. Gemeinsames Wissen nie außerhalb dieses Verzeichnisses ablegen. Dateien direkt bearbeiten, nicht über Symlinks mit `sed -i` o. Ä. Keine Dateien mit Endung `.sqlite` oder `.log` und keine mit `cache`, `token`, `secret` oder `credentials` im Namen anlegen; das Backup schließt sie aus.
 
 ## Projektarbeit
 - Vor größeren Änderungen README-, AGENTS.md- und Projektdokumentation lesen.

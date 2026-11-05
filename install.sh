@@ -774,6 +774,17 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ]; then
     run install -m 755 "$REPO/memory/tools/memlint.py" "$MEM/tools/memlint.py"
     say "  memlint.py: installiert"
   fi
+  # Sicherheitswerkzeuge (seit 2026-11-05): nur bereitgelegt, nie eingeschaltet.
+  # Einschalten entscheidet der Nutzer (claude-guard-einschalten.sh, home-snapshots-einrichten.sh).
+  for t in claude-guard-hook.py claude-guard-einschalten.sh home-snapshots-einrichten.sh; do
+    if cmp -s "$REPO/memory/tools/$t" "$MEM/tools/$t"; then
+      say "  $t: ok"
+    else
+      [ -e "$MEM/tools/$t" ] && backup "$MEM/tools/$t"
+      run install -m 755 "$REPO/memory/tools/$t" "$MEM/tools/$t"
+      say "  $t: bereitgelegt (nicht eingeschaltet)"
+    fi
+  done
   # Gemeinsame Skills (seit 2026-10-16); memlint --link verlinkt sie unten
   # in die Skill-Ordner der eingerichteten Agenten.
   for sk in "$REPO"/memory/template/skills/*/; do

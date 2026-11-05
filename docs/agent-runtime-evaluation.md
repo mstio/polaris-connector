@@ -434,7 +434,7 @@ polaris-chatgpt-connector/
       curator.py          # Übergabe von Session-Kandidaten, kein Direkt-Write
 ```
 
-Der PoC bleibt vorerst unter `experiments/agent-runtime-poc/`, damit diese
+Der PoC lag unter `experiments/agent-runtime-poc/` (seit 2026-11-05 nur noch im git-Tag `archiv/agent-runtime-poc-20261105`, Entschlackung), damit diese
 Zielstruktur nicht vor einer erfolgreichen Evaluierung produktiv vorgetäuscht
 wird.
 
@@ -567,7 +567,7 @@ lautet das Ergebnis „nicht messbar“, nicht „kein Cachetreffer“.
 
 ### Umgesetzter PoC-Stand (2026-09-20)
 
-Der isolierte PoC liegt unter `experiments/agent-runtime-poc/`. Verifiziert
+Der isolierte PoC lag unter `experiments/agent-runtime-poc/` (archiviert im Tag `archiv/agent-runtime-poc-20261105`; zurückholen: `git checkout archiv/agent-runtime-poc-20261105 -- experiments`). Verifiziert
 wurden in zwei getrennten Prozessen:
 
 - Start, read-only `search_project`-Tool Call und native Persistenz;

@@ -21,6 +21,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from . import usage
 from . import context, layout, merge, storage
 
 SCHEMA = {
@@ -97,6 +98,7 @@ def build_prompt(source: str, items: list[tuple[str, dict, str]]) -> str:
 def review(change: dict, source: str, project: Path, cfg, run_llm) -> list[dict]:
     """Findet Beanstandungen und vermerkt "major" am Element (review_note).
     Liefert alle Befunde [{item, verdict, issue_type, explanation}]."""
+    usage.count("reviewer")
     items = _items(change, old_entry_lookup(project))
     if not items:
         return []

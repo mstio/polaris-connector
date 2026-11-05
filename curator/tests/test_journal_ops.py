@@ -143,7 +143,6 @@ class TestJournalLocation(unittest.TestCase):
         tp = TempProject()
         with tp as project:
             pending_journal(tp, project)
-            self.assertFalse(journal.legacy_path(project).exists())
             self.assertTrue(str(journal.path(project)).startswith(str(journal.journal_dir())))
             pipeline.run_project(project, fast_config(), llm_fn=FakeLlm([]))
             self.assertIsNone(journal.existing_path(project))
@@ -154,26 +153,3 @@ class TestJournalLocation(unittest.TestCase):
             (a / "X").mkdir()
             (b / "X").mkdir()
             self.assertNotEqual(journal.path(a / "X"), journal.path(b / "X"))
-
-    def test_legacy_journal_is_completed_and_removed(self):
-        tp = TempProject()
-        with tp as project:
-            pending_journal(tp, project)
-            layout.ensure_polaris_dir(project)
-            journal.path(project).replace(journal.legacy_path(project))
-            self.assertEqual(journal.existing_path(project), journal.legacy_path(project))
-            pipeline.run_project(project, fast_config(), llm_fn=FakeLlm([]))
-            self.assertIn("Wichtig", layout.decisions_path(project).read_text())
-            self.assertIsNone(journal.existing_path(project))
-
-    def test_discard_handles_legacy_journal(self):
-        tp = TempProject()
-        with tp as project:
-            pending_journal(tp, project)
-            layout.ensure_polaris_dir(project)
-            journal.path(project).replace(journal.legacy_path(project))
-            layout.knowledge_path(project).write_text("# anders\n", encoding="utf-8")
-            with patch.object(cli, "_resolve_project", return_value=project):
-                cli.cmd_journal(type("A", (), {"project": "x", "discard": True})())
-            self.assertIsNone(journal.existing_path(project))
-            self.assertTrue(list((layout.polaris_dir(project) / "backups").glob("journal.json.*-discarded")))

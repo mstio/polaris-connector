@@ -1,6 +1,6 @@
 # ADR 001: Agent-Runtime über Pydantic AI hinter dünnen Polaris-Ports
 
-- Status: Accepted for isolated PoC
+- Status: Accepted for isolated PoC; PoC seit 2026-11-05 archiviert (git-Tag `archiv/agent-runtime-poc-20261105`), nicht weiterverfolgt
 - Datum: 2026-09-20
 - Entscheider: lokaler Polaris-/Omarchy-Stack
 - Vollständige Evaluation: [../agent-runtime-evaluation.md](../agent-runtime-evaluation.md)
