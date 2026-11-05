@@ -8,7 +8,7 @@
 #
 # Alle root-Schritte laufen in EINEM Aufruf (sudo oder pkexec), in der Regel also
 # eine Passwortabfrage; pkexec merkt sich die Anmeldung nicht. --pkexec auf Rechnern,
-# deren Regeln pkexec statt sudo vorschreiben (Rueckmeldung eines Nutzers, 2026-11-05).
+# deren Regeln pkexec statt sudo vorschreiben (Rueckmeldung von bernhard2804, 2026-11-05).
 #
 # Warum: Schutz gegen Zerstoerung (versehentlich oder durch eine eingeschleuste
 # Anweisung an einen Agenten). Die Snapshots gehoeren root; ein Programm mit den

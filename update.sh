@@ -127,7 +127,7 @@ else
   install_failed=0
 fi
 # Zustand vor dem Health-Check schreiben, sonst meldet er im selben Lauf noch
-# "Update verfuegbar" (Rueckmeldung eines Nutzers, 2026-11-05). Beim Rueckweg
+# "Update verfuegbar" (Rueckmeldung von bernhard2804, 2026-11-05). Beim Rueckweg
 # unten wird er wieder auf den alten Stand gesetzt.
 write_state 0 "$(version HEAD)" "$(version HEAD)"
 after="$(health_level)"

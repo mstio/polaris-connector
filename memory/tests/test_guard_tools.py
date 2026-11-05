@@ -175,7 +175,7 @@ class TestSnapshotScript(unittest.TestCase):
         self.assertIn("mv -T --exchange", text)
 
     def test_root_steps_single_call_and_pkexec(self):
-        # Alle root-Schritte in einem Aufruf; --pkexec statt sudo (Rueckmeldung eines Nutzers, 2026-11-05).
+        # Alle root-Schritte in einem Aufruf; --pkexec statt sudo (Rueckmeldung von bernhard2804, 2026-11-05).
         text = SNAP.read_text()
         self.assertNotIn("run sudo ", text)
         self.assertIn('"$ROOT" /usr/bin/bash -c "$ROOT_STEPS"', text)

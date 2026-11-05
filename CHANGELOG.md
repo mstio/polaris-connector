@@ -8,7 +8,7 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
-- **Rückmeldungen eines Nutzers (2026-11-05):**
+- **Rückmeldungen von bernhard2804 (2026-11-05):**
   - `polaris update`: Der Health Check am Ende meldete noch „Update
     verfügbar“; der Zustand wird jetzt vorher geschrieben (Test neu).
   - `home-snapshots-einrichten.sh`: alle root-Schritte in einem Aufruf (eine

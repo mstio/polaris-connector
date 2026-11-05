@@ -1,6 +1,6 @@
 """update.sh: Zustand fuer den Health-Check vor dessen Aufruf (seit 2026-11-05).
 
-Rueckmeldung eines Nutzers: Der Health-Check im selben Update-Lauf meldete
+Rueckmeldung von bernhard2804: Der Health-Check im selben Update-Lauf meldete
 noch "Update verfuegbar", weil update-check.json erst danach geschrieben wurde.
 """
 import json
