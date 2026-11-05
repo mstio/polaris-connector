@@ -826,7 +826,7 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ]; then
     elif [ -f "$REPO/scripts/agents-template.py" ] && python3 "$REPO/scripts/agents-template.py" --check >/dev/null 2>&1; then
       say "  Agentenregeln: Vorlage stammt aus diesem AGENTS.md"
     else
-      warn "Allgemeine Agentenregeln haben sich geändert: $(tilde "$tmpl") mit ~/.config/ai-agents/AGENTS.md vergleichen, dem Nutzer die neuen oder geänderten Regeln mit ihrem Nutzen vorstellen und gemeinsam entscheiden, was übernommen wird (nichts ungefragt, eigene Regeln bleiben). Danach quittieren: sha256sum $(tilde "$tmpl") | cut -d' ' -f1 > $(tilde "$ack")"
+      warn "Allgemeine Agentenregeln haben sich geändert: $(tilde "$tmpl") mit ~/.config/ai-agents/AGENTS.md vergleichen, dem Nutzer die neuen oder geänderten Regeln mit ihrem Nutzen vorstellen und gemeinsam entscheiden, was übernommen wird (nichts ungefragt, eigene Regeln bleiben). Nur einzelne Regeln übernehmen (neue erkennbar an „seit <Datum>“), die Vorlage nie als Ganzes: Ihr fehlen alle rechnerspezifischen Regeln und Abschnitte. Danach quittieren: sha256sum $(tilde "$tmpl") | cut -d' ' -f1 > $(tilde "$ack")"
     fi
   fi
   # Platzhalter auch fuer bestehende Gedaechtnisse, deren AGENTS.md schon auf

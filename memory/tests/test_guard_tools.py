@@ -174,6 +174,15 @@ class TestSnapshotScript(unittest.TestCase):
         self.assertNotIn("rclone-projekte", text)
         self.assertIn("mv -T --exchange", text)
 
+    def test_root_steps_single_call_and_pkexec(self):
+        # Alle root-Schritte in einem Aufruf; --pkexec statt sudo (Rueckmeldung eines Nutzers, 2026-11-05).
+        text = SNAP.read_text()
+        self.assertNotIn("run sudo ", text)
+        self.assertIn('"$ROOT" /usr/bin/bash -c "$ROOT_STEPS"', text)
+        r = subprocess.run(["bash", str(SNAP), "--unbekannt"], capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("--pkexec", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

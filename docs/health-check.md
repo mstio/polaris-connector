@@ -27,6 +27,16 @@ Hints on things that are easy to overlook (since 2026-11-05):
 
 All of them only read local files; no extra timers or network access.
 
+Not every hint is always a line, even with `--all`:
+
+- **Reboot** appears only when a reboot is actually due.
+- **Backup destination** appears only when omarchy-backup has a remote
+  destination and has checked it at least once (omarchy-backup from
+  2026-11-05 on; written by a snapshot, `omarchy-backup doctor` or an upload
+  to `~/.local/share/omarchy-backup/integrity-status.json`). No line means:
+  no check result yet, not "everything fine".
+- **Disk errors** appears only on machines with btrfs.
+
 In the widget every problem line offers **Ask agent**: it opens your agent
 (the curator's runtime, `claude` or `codex`) in a terminal with the message
 and the request to find the cause and propose a fix, changing nothing before

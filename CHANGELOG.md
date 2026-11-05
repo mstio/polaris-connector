@@ -8,6 +8,16 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Rückmeldungen eines Nutzers (2026-11-05):**
+  - `polaris update`: Der Health Check am Ende meldete noch „Update
+    verfügbar“; der Zustand wird jetzt vorher geschrieben (Test neu).
+  - `home-snapshots-einrichten.sh`: alle root-Schritte in einem Aufruf (eine
+    Passwortabfrage), neu `--pkexec` statt sudo.
+  - Hinweis zur AGENTS-Vorlage: nur einzelne neue Regeln übernehmen, nie die
+    ganze Datei (`install.sh`, Agenten-Leitfaden).
+  - `docs/health-check.md`: wann „Neustart“, „Backup-Ziel“ und
+    „Plattenfehler“ als Zeile erscheinen.
+
 - **READMEs auf Englisch (2026-11-05):** `curator/README.md`, `memory/README.md`
   und `dist/README.md` übersetzt und gegen den Code abgeglichen (u. a.
   vollständige CLI, Module, Health-Check-Gruppen, Sandbox, `replaces_id`,

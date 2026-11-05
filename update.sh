@@ -126,6 +126,10 @@ if ! "$INSTALL" "${install_args[@]}"; then
 else
   install_failed=0
 fi
+# Zustand vor dem Health-Check schreiben, sonst meldet er im selben Lauf noch
+# "Update verfuegbar" (Rueckmeldung eines Nutzers, 2026-11-05). Beim Rueckweg
+# unten wird er wieder auf den alten Stand gesetzt.
+write_state 0 "$(version HEAD)" "$(version HEAD)"
 after="$(health_level)"
 
 if [ "$install_failed" = 1 ] || { [ "$after" = error ] && [ "$before" != error ]; }; then
@@ -136,7 +140,6 @@ if [ "$install_failed" = 1 ] || { [ "$after" = error ] && [ "$before" != error ]
   exit 2
 fi
 
-write_state 0 "$(version HEAD)" "$(version HEAD)"
 echo "Polaris auf $(version HEAD) aktualisiert (Health-Check: $after)."
 update_extras
 exit 0

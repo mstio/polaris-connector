@@ -4,10 +4,15 @@
 #
 #   ~/.config/ai-agents/tools/home-snapshots-einrichten.sh            # Probelauf: zeigt nur, was passiert
 #   ~/.config/ai-agents/tools/home-snapshots-einrichten.sh --ausfuehren
+#   ... --ausfuehren --pkexec   # root-Schritte per pkexec statt sudo (Polkit-Dialog)
+#
+# Alle root-Schritte laufen in EINEM Aufruf (sudo oder pkexec), in der Regel also
+# eine Passwortabfrage; pkexec merkt sich die Anmeldung nicht. --pkexec auf Rechnern,
+# deren Regeln pkexec statt sudo vorschreiben (Rueckmeldung eines Nutzers, 2026-11-05).
 #
 # Warum: Schutz gegen Zerstoerung (versehentlich oder durch eine eingeschleuste
 # Anweisung an einen Agenten). Die Snapshots gehoeren root; ein Programm mit den
-# Rechten des Nutzers kann sie weder lesen noch loeschen. Wiederherstellen braucht sudo.
+# Rechten des Nutzers kann sie weder lesen noch loeschen. Wiederherstellen braucht root (sudo/pkexec).
 #
 # Ablauf:
 #  1. Pruefen: /home ist btrfs, snapper da, Steam laeuft nicht.
@@ -24,29 +29,43 @@
 #     sie nutzt keine Zeitplaene.
 #  5. snapper-timeline.timer einschalten, Timer und Laufwerk wieder starten.
 #
-# Rueckbau: sudo snapper -c home delete-config; sudo systemctl disable --now snapper-timeline.timer
+# Rueckbau (als root, sudo oder pkexec): snapper -c home delete-config; systemctl disable --now snapper-timeline.timer
 # (die Subvolumes duerfen bleiben). Hinweis Datenschutz: Geloeschtes bleibt bis zu vier
 # Wochen in den Snapshots erhalten.
 set -euo pipefail
-DO=0
-[ "${1:-}" = "--ausfuehren" ] && DO=1
-run() { if [ "$DO" = 1 ]; then echo "+ $*"; "$@"; else echo "[probe] $*"; fi; }
+DO=0 ROOT=sudo
 die() { echo "FEHLER: $*" >&2; exit 1; }
+for arg in "$@"; do
+  case "$arg" in
+    --ausfuehren) DO=1 ;;
+    --pkexec) ROOT=pkexec ;;   # nur diese zwei Werte, nichts frei Waehlbares
+    *) die "unbekannte Option $arg (erlaubt: --ausfuehren, --pkexec)" ;;
+  esac
+done
+run() { if [ "$DO" = 1 ]; then echo "+ $*"; "$@"; else echo "[probe] $*"; fi; }
 stamp="$(date +%Y%m%d-%H%M%S)"
 
 [ "$(stat -f -c %T /home)" = "btrfs" ] || die "/home ist kein btrfs"
 [ "$(stat -c %i /home)" = "256" ] || die "/home ist kein eigenes btrfs-Subvolume (snapper braucht das)"
 command -v snapper >/dev/null || die "snapper fehlt"
 command -v btrfs >/dev/null || die "btrfs-progs fehlt"
+command -v "$ROOT" >/dev/null || die "$ROOT fehlt"
 mv --help 2>/dev/null | grep -q -- '--exchange' || die "mv --exchange fehlt (coreutils >= 9.5)"
 if pgrep -x steam >/dev/null || pgrep -x steamwebhelper >/dev/null; then
   [ "$DO" = 1 ] && die "Steam bitte vorher beenden"
   echo "WARNUNG: Steam laeuft - vor --ausfuehren beenden"
 fi
-if [ "$DO" = 1 ] && ! sudo -n true 2>/dev/null; then
+if [ "$DO" = 1 ] && [ "$ROOT" = sudo ] && ! sudo -n true 2>/dev/null; then
   # Ohne Terminal (z. B. "!" in Claude Code) scheitert sudo erst nach dem Umbau (05.11.).
   [ -t 0 ] || die "sudo braucht ein Terminal fuer das Passwort - bitte in einem Terminalfenster ausfuehren"
   echo "sudo fragt gleich nach dem Passwort."
+  sudo -v || die "sudo-Anmeldung gescheitert - nichts geaendert"
+fi
+if [ "$DO" = 1 ] && [ "$ROOT" = pkexec ]; then
+  # pkexec merkt sich nichts; ohne Terminal (und ohne Polkit-Agent) scheitert es
+  # erst nach dem Umbau der Ordner (Fable-Pruefung 2026-11-05).
+  [ -t 0 ] || die "pkexec braucht ein Terminal (Polkit-Dialog oder Text-Agent) - bitte in einem Terminalfenster ausfuehren"
+  echo "pkexec fragt nach dem Umbau der Ordner einmal (Polkit-Dialog oder im Terminal)."
 fi
 if [ -e /etc/snapper/configs/home ]; then die "snapper-Konfiguration 'home' gibt es schon"; fi
 
@@ -77,16 +96,24 @@ for d in "$HOME/.cache" "$HOME/.local/share/Steam" "$HOME/Games"; do
   echo "  $d: alter Ordner bleibt als $old (nach Pruefung: rm -rf '$old')"
 done
 
-echo "== snapper-Konfiguration home"
-run sudo snapper -c home create-config /home
-run sudo snapper -c home set-config TIMELINE_CREATE=yes TIMELINE_CLEANUP=yes \
-  TIMELINE_LIMIT_HOURLY=12 TIMELINE_LIMIT_DAILY=7 TIMELINE_LIMIT_WEEKLY=4 \
-  TIMELINE_LIMIT_MONTHLY=0 TIMELINE_LIMIT_QUARTERLY=0 TIMELINE_LIMIT_YEARLY=0 \
-  NUMBER_CLEANUP=yes NUMBER_LIMIT=10
-run sudo systemctl enable --now snapper-timeline.timer
-run sudo snapper -c home create --description "erster Snapshot nach Einrichtung"
+echo "== snapper-Konfiguration home (als root per $ROOT, ein Aufruf)"
+# Fester Text, keine Variablen: der root-Teil haengt von keiner Eingabe ab.
+ROOT_STEPS='set -euo pipefail
+trap '"'"'echo "FEHLER im root-Schritt: $BASH_COMMAND - Rueckbau: snapper -c home delete-config; systemctl disable --now snapper-timeline.timer" >&2'"'"' ERR
+snapper -c home create-config /home
+snapper -c home set-config TIMELINE_CREATE=yes TIMELINE_CLEANUP=yes TIMELINE_LIMIT_HOURLY=12 TIMELINE_LIMIT_DAILY=7 TIMELINE_LIMIT_WEEKLY=4 TIMELINE_LIMIT_MONTHLY=0 TIMELINE_LIMIT_QUARTERLY=0 TIMELINE_LIMIT_YEARLY=0 NUMBER_CLEANUP=yes NUMBER_LIMIT=10
+systemctl enable --now snapper-timeline.timer
+snapper -c home create --description "erster Snapshot nach Einrichtung"
+snapper -c home list || true'
+if [ "$DO" = 1 ]; then
+  # sudo-Anmeldung auffrischen: Das Kopieren grosser Ordner kann laenger dauern als ihr Zeitfenster.
+  [ "$ROOT" = sudo ] && { sudo -v || die "sudo-Anmeldung gescheitert - Ordner sind umgebaut, root-Teil fehlt; Skript erneut ausfuehren"; }
+  printf '+ %s:\n%s\n' "$ROOT" "$ROOT_STEPS"
+  "$ROOT" /usr/bin/bash -c "$ROOT_STEPS"
+else
+  printf '[probe] %s:\n%s\n' "$ROOT" "$ROOT_STEPS" | sed '2,$s/^/[probe]   /'
+fi
 
 echo "== Pruefung"
-run sudo snapper -c home list
 run ls -ld /home/.snapshots
 echo "Fertig. Im Maschinengedaechtnis dokumentieren (handoff/sicherheit-rechte.md o. Ae.)."
