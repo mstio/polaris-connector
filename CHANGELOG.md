@@ -8,6 +8,9 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Widget 0.3.1 (2026-11-05):** zeigt fremde Texte (Dateinamen, Radar,
+  Fehlermeldungen der Modell-CLI) nur noch als reinen Text, nie als HTML
+  (Härtung vom 04.11. jetzt auch im Marktplatz-Repo `mst.polaris-curator`).
 - **Entschlackt (2026-11-05):** alte Migration der Curator-Zustände aus
   September (`legacy_migration`, Feld `coverage_migrated`), Journale am alten
   Ort auf dem Laufwerk (bis 10.10.), toter Code (`guard.strip_invisible`,

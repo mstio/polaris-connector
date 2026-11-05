@@ -137,6 +137,10 @@ and your AI setup healthy. Pick what you need.
 - **Machine memory:** your AI agents stop forgetting. Claude Code, Codex and
   others share one notebook about your machine (what was set up, why, what
   to avoid), so you don't explain it again in every session. [More](docs/machine-memory.md)
+- **Agent guard (opt-in):** a mail or web page with hidden instructions can't
+  quietly make Claude Code send mail, change your systems or switch off its
+  own protection; it has to ask you first. Plus hourly /home snapshots that no
+  agent can delete. [More](docs/machine-memory.md#agent-guard-and-home-snapshots-opt-in)
 
 **Extras**
 

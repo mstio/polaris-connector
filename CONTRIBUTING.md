@@ -122,10 +122,11 @@ Rules:
   extra packages:
 
 ```bash
+scripts/run-tests.sh                                                # all Python suites; required before publishing
 (cd tests && POLARIS_NO_NOTIFY=1 python3 -m unittest discover)    # bridge, also starts the node tests
 node --test tests/extension/                                        # extension only
 (cd curator/tests && POLARIS_NO_NOTIFY=1 python3 -m unittest discover)
-python3 -m unittest discover -s memory/tests                       # memlint, radar
+python3 -m unittest discover -s memory/tests                       # memlint, radar, guard tools
 ```
 
 - Match the surrounding code: comments and messages are mostly German, in

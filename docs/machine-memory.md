@@ -17,6 +17,27 @@ links, tags, secrets and backup coverage; the health check shows the result.
   the last successful run is older than 2 days.
 - `--no-memory` skips all of this.
 
+## Agent guard and /home snapshots (opt-in)
+
+An AI agent that reads a mail or web page can meet hidden instructions
+("prompt injection"). `install.sh` places two tools in
+`~/.config/ai-agents/tools/`, but **never switches them on**; you decide.
+
+- **Claude Code guard hook** (`claude-guard-hook.py`, switch with
+  `claude-guard-einschalten.sh standard|streng|aus`): logs every action
+  (`~/.claude/guard/audit.jsonl`, private), always asks before an agent writes
+  to business systems via MCP (send, create, change …) or changes its own
+  protection. Level `streng` additionally asks before every action with
+  consequences once a session has read untrusted content (web, mail and chat
+  connectors, downloads, your Polaris project folders). On errors it asks
+  instead of letting things through; ~44 ms per action, no background process.
+  Limit: obfuscated shell commands get past the text check at level
+  `standard`; snapshots and the log are the backstop.
+- **Hourly btrfs snapshots of /home** (`home-snapshots-einrichten.sh`, dry
+  run without options, `--ausfuehren` in a terminal): owned by root, so no
+  program running as you, including an agent, can read or delete them. Caches,
+  Steam and Games become separate subvolumes first and are not snapshotted.
+
 ---
 
 [Back to the README](../README.md)
