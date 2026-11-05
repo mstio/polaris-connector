@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -25,7 +26,12 @@ HOME = Path.home()
 EXTENSION_ID = "polaris-chatgpt-connector@mstarchy.local"
 NATIVE_MANIFEST = HOME / ".mozilla" / "native-messaging-hosts" / "polaris_bridge.json"
 FIREFOX_DIR = HOME / ".config" / "mozilla" / "firefox"
-BACKUP_STATE = HOME / ".local" / "share" / "omarchy-backup" / "state.json"
+BACKUP_DATA = HOME / ".local" / "share" / "omarchy-backup"
+BACKUP_STATE = BACKUP_DATA / "state.json"
+# Ergebnis der letzten Zielpruefung von omarchy-backup (integrity check,
+# doctor, push); liegt lokal, wird nie hochgeladen.
+BACKUP_INTEGRITY = BACKUP_DATA / "integrity-status.json"
+BACKUP_SNAPSHOTS = BACKUP_DATA / "snapshots"
 POLARIS_CONFIG_DIR = HOME / ".config" / "polaris"
 # memlint aus dem Polaris-Programm, nicht aus ~/.config/ai-agents/tools:
 # Der Health Check fuehrt es alle 10 min aus, und das Gedaechtnis kann aus
@@ -51,8 +57,23 @@ WIDGET_SYNC_HINT = "./install.sh --yes --no-units --no-backup --no-memory, dann 
 _LEVELS = {"ok": 0, "warn": 1, "error": 2}
 
 
-def _c(cid: str, label: str, level: str, detail: str) -> dict:
-    return {"id": cid, "label": label, "level": level, "detail": detail}
+def _c(cid: str, label: str, level: str, detail: str, command: str | None = None) -> dict:
+    """command (seit 2026-11-05): fertiger Befehl zum Kopieren im Widget.
+    Teile aus Dateien/Pfaden immer mit _sh() quoten (Fremdtext)."""
+    c = {"id": cid, "label": label, "level": level, "detail": detail}
+    if command:
+        c["command"] = command
+    return c
+
+
+def _sh(path: Path | str) -> str:
+    """Pfad fuer einen kopierbaren Befehl: unter HOME als ~/<gequotet>, damit
+    er lesbar bleibt und trotzdem jeder Dateiname sicher ist."""
+    p = Path(path)
+    try:
+        return "~/" + shlex.quote(str(p.relative_to(HOME)))
+    except ValueError:
+        return shlex.quote(str(p))
 
 
 def _systemctl_user(*args: str) -> str:
@@ -375,7 +396,9 @@ def check_widget(src: Path | None = None, active: Path | None = None) -> dict | 
     differ = sorted(n for n in want.keys() | have.keys() if want.get(n) != have.get(n))
     if differ:
         names = ", ".join(differ[:3]) + (" …" if len(differ) > 3 else "")
-        return _c("widget", "Widget", "warn", t("Kopie veraltet ({names}) – {hint}", names=names, hint=t(WIDGET_SYNC_HINT)))
+        repo = src.parents[1]
+        return _c("widget", "Widget", "warn", t("Kopie veraltet ({names}) – {hint}", names=names, hint=t(WIDGET_SYNC_HINT)),
+                  command=f"{_sh(repo / 'install.sh')} --yes --no-units --no-backup --no-memory && omarchy restart shell")
     return _c("widget", "Widget", "ok", t("Kopie aktuell"))
 
 
@@ -406,7 +429,7 @@ def check_update(now: datetime) -> dict | None:
     if int(state.get("behind") or 0) > 0:
         return _c("update", "Update", "warn",
                   t("verfügbar: {local} → {remote} – polaris update",
-                    local=state.get("local", "?"), remote=state.get("remote", "?")))
+                    local=state.get("local", "?"), remote=state.get("remote", "?")), command="polaris update")
     return _c("update", "Update", "ok", t("aktuell ({local})", local=state.get("local", "?")))
 
 
@@ -470,13 +493,102 @@ def check_backup(now: datetime) -> dict:
     detail = t("Snapshot {last}, hochgeladen {pushed}, doctor {doctor}",
                last=_fmt_age(last_days), pushed=_fmt_age(pushed_days), doctor=doctor)
     if doctor not in ("HEALTHY", "?"):
-        return _c("backup", "omarchy-backup", "error", detail)
+        return _c("backup", "omarchy-backup", "error", detail, command="omarchy-backup doctor")
     if pushed_days is None or pushed_days > 7:
         return _c("backup", "omarchy-backup", "error", detail)
     if (last_days or 99) > 2 or (pushed_days or 99) > 2 or (result and result != "success"):
         suffix = t(", letzter Lauf: {result}", result=result) if result and result != "success" else ""
         return _c("backup", "omarchy-backup", "warn", detail + suffix)
     return _c("backup", "omarchy-backup", "ok", detail)
+
+
+def check_backup_integrity() -> dict | None:
+    """Zielpruefung von omarchy-backup (seit 2026-11-05): Befunde sofort
+    zeigen, nicht erst nach dem naechsten doctor-Lauf. Fehlt die Datei
+    (aelteres omarchy-backup, nie geprueft): keine Zeile."""
+    try:
+        status = json.loads(BACKUP_INTEGRITY.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return _c("backup-integrity", t("Backup-Ziel"), "warn", t("Prüfergebnis unlesbar"))
+    problems = [str(p) for p in status.get("problems") or []]
+    unrecorded = [str(u) for u in status.get("unrecorded") or []]
+    if problems:
+        return _c("backup-integrity", t("Backup-Ziel"), "error",
+                  t("außerhalb dieses Rechners verändert: {items} – omarchy-backup doctor",
+                    items=", ".join(problems[:3]) + (" …" if len(problems) > 3 else "")),
+                  command="omarchy-backup doctor")
+    if unrecorded:
+        return _c("backup-integrity", t("Backup-Ziel"), "warn",
+                  t("ungeprüfte ältere Uploads: {items} – omarchy-backup doctor", items=", ".join(unrecorded[:3])),
+                  command="omarchy-backup doctor")
+    return _c("backup-integrity", t("Backup-Ziel"), "ok", t("unverändert"))
+
+
+def _untracked_now(repo: Path) -> list[str] | None:
+    """Aktuell nicht versionierte Dateien eines Repos (None: nicht pruefbar).
+    Nur fuer Repos, die das Manifest meldet; Pfad nur unterhalb von HOME."""
+    try:
+        if not repo.resolve().is_relative_to(HOME.resolve()) or not (repo / ".git").exists():
+            return None
+        out = subprocess.run(["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard", "-z"],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if out.returncode != 0:
+        return None
+    return [f for f in out.stdout.split("\0") if f]
+
+
+def _home_rel(path: Path) -> str:
+    try:
+        return "~/" + str(path.relative_to(HOME))
+    except ValueError:
+        return str(path)
+
+
+def check_repos() -> dict | None:
+    """Was in gesicherten git-Repos nicht im Backup landet (seit 2026-11-05):
+    neue, nicht versionierte Dateien und verschwundene Repos. Grundlage ist
+    das Manifest des neuesten lokalen Snapshots; nur fuer dort gemeldete Repos
+    fragt der Check git direkt (Dateinamen, und ob es inzwischen erledigt ist)."""
+    try:
+        state = json.loads(BACKUP_STATE.read_text(encoding="utf-8"))
+        newest = max(state.get("snapshots") or [], key=lambda s: s.get("created_at", ""))
+        manifest = json.loads((BACKUP_SNAPSHOTS / str(newest["name"]) / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    missing, files, resolved, commands = [], [], 0, []
+    for repo in manifest.get("repos") or []:
+        path = HOME / str(repo.get("path", ""))
+        if repo.get("missing"):
+            missing.append(_home_rel(path))
+        elif int(repo.get("untracked") or 0) > 0:
+            now = _untracked_now(path)
+            if now is None:
+                files.append(t("{repo} ({n} Datei(en))", repo=_home_rel(path), n=int(repo["untracked"])))
+            elif now:
+                files += [f"{_home_rel(path)}/{f}" for f in now]
+                repo_q = _sh(path)
+                names = " ".join(shlex.quote(f) for f in now)
+                msg = shlex.quote(t("Neue Dateien sichern: {names}", names=", ".join(now[:3]) + (" …" if len(now) > 3 else "")))
+                commands.append(f"git -C {repo_q} add -- {names} && git -C {repo_q} commit -m {msg}")
+            else:
+                resolved += 1
+    if missing:
+        return _c("repos", t("Repos"), "warn",
+                  t("gesichertes Repo fehlt: {items} – verschoben? Pfad in ~/.config/omarchy-backup/paths.conf anpassen",
+                    items=", ".join(missing[:3])))
+    if files:
+        shown = ", ".join(files[:3]) + (t(" und {n} weitere", n=len(files) - 3) if len(files) > 3 else "")
+        return _c("repos", t("Repos"), "warn",
+                  t("wird nicht gesichert: {items} – neue Datei in einem git-Repo; wichtig: committen, "
+                    "sonst in .gitignore eintragen", items=shown),
+                  command=" && ".join(commands) or None)
+    if resolved:
+        return _c("repos", t("Repos"), "ok", t("erledigt – der nächste Snapshot sichert es"))
+    return _c("repos", t("Repos"), "ok", t("alles im Backup"))
 
 
 RCLONE_VFS_META = HOME / ".cache" / "rclone" / "vfsMeta"
@@ -759,6 +871,42 @@ def check_crashes(now: datetime | None = None, window_hours: int = CRASH_WINDOW_
     return _c("crashes", t("Abstürze"), "ok", t("keine"))
 
 
+MODULES_DIR = Path("/usr/lib/modules")
+BTRFS_SYSFS = Path("/sys/fs/btrfs")
+
+
+def check_reboot() -> dict | None:
+    """Kernel aktualisiert, aber nicht neu gestartet (seit 2026-11-05): Die
+    Module des laufenden Kernels fehlen dann; neue Treiber (USB-Stick,
+    Dateisysteme) lassen sich nicht mehr laden."""
+    if not MODULES_DIR.is_dir():
+        return None
+    if (MODULES_DIR / os.uname().release).is_dir():
+        return None
+    return _c("reboot", t("Neustart"), "warn", t("Kernel aktualisiert – bitte neu starten"))
+
+
+def check_disk_errors() -> list[dict]:
+    """Fehlerzaehler von btrfs (seit 2026-11-05; sysfs, ohne root): jeder
+    Lese-, Schreib- oder Pruefsummenfehler ist ein frueher Hinweis auf eine
+    sterbende SSD oder Kabelprobleme."""
+    bad = []
+    for stats in sorted(BTRFS_SYSFS.glob("*/devinfo/*/error_stats")):
+        try:
+            pairs = dict(line.split() for line in stats.read_text().splitlines() if line.strip())
+        except (OSError, ValueError):
+            continue
+        errs = {k: int(v) for k, v in pairs.items() if v.isdigit() and int(v) > 0}
+        if errs:
+            fs = stats.parts[-4][:8]
+            bad.append(f"{fs}: " + ", ".join(f"{k} {v}" for k, v in sorted(errs.items())))
+    if not bad:
+        return [] if not any(BTRFS_SYSFS.glob("*/devinfo")) else [_c("disk-errors", t("Plattenfehler"), "ok", t("keine"))]
+    return [_c("disk-errors", t("Plattenfehler"), "error",
+               t("btrfs meldet Fehler: {items} – Daten sichern, sudo btrfs device stats prüfen", items="; ".join(bad)),
+               command="sudo btrfs device stats /")]
+
+
 def check_system(now: datetime | None = None) -> list[dict]:
     items = []
     seen_devs: set[str | None] = set()
@@ -795,6 +943,10 @@ def check_system(now: datetime | None = None) -> list[dict]:
             continue
         items.append(_c("battery", t("Akku"), "warn" if cap < 15 and status == "Discharging" else "ok", f"{cap} % ({status})"))
         break
+    reboot = check_reboot()
+    if reboot:
+        items.append(reboot)
+    items.extend(check_disk_errors())
     crashes = check_crashes(now)
     if crashes:
         items.append(crashes)
@@ -810,7 +962,8 @@ GROUPS = [
     ("curator", "Curator", [("Timer", "curator"), ("Kurationsschritte", "journal"), ("Kuration", "curation"),
                                          ("Modell", "llm"), ("Widget", "widget")],
      "curator"),
-    ("storage", "Speicher & Sicherung", [("Projektordner", "mount"), ("Backup", "backup")], "backup"),
+    ("storage", "Speicher & Sicherung", [("Projektordner", "mount"), ("Backup", "backup"),
+                                         ("Backup-Ziel", "backup-integrity"), ("Repos", "repos")], "backup"),
     ("memory", "Maschinengedächtnis", [("Maschinengedächtnis", "memory")], "memory"),
     ("security", "Sicherheit", [("Sicherheit", "security")], "security"),
 ]
@@ -832,7 +985,13 @@ def _group(gid: str, label: str, members: list[tuple[str, dict]], primary: dict 
         bad = sorted(((n, c) for n, c in members if c["level"] != "ok"), key=lambda nc: -_LEVELS[nc[1]["level"]])
         prefix = len(members) > 1
         detail = " · ".join((f"{n}: " if prefix else "") + c["detail"] for n, c in bad)
-    return {"id": gid, "label": label, "level": level, "detail": detail, "parts": [c for _n, c in members]}
+    group = {"id": gid, "label": label, "level": level, "detail": detail, "parts": [c for _n, c in members]}
+    # Befehl zum Kopieren: der des schlimmsten auffaelligen Teils.
+    if level != "ok":
+        command = next((c["command"] for _n, c in bad if c.get("command")), None)
+        if command:
+            group["command"] = command
+    return group
 
 
 def group_components(checks: list[dict]) -> list[dict]:
@@ -876,6 +1035,8 @@ def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_clau
         check_curator_timer(),
         check_llm(),
         check_backup(now),
+        check_backup_integrity(),
+        check_repos(),
         check_mount(),
         check_memory(),
         check_security(now),

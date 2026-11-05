@@ -475,6 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     health_p = sub.add_parser("health", help="Health-Check der eigenen Bausteine (Widget)")
     health_p.add_argument("--json", action="store_true")
     health_p.add_argument("--all", action="store_true", help="alle Einzelpruefungen statt der Gruppen zeigen")
+    health_p.add_argument("--ask", metavar="ID", help="Standard-Agenten im Terminal oeffnen, der diese Meldung prueft (Widget)")
     health_p.set_defaults(func=cmd_health)
 
     index_p = sub.add_parser(
@@ -678,6 +679,12 @@ def cmd_health(args: argparse.Namespace) -> int:
         cfg.chat_sources_explicit,
         cfg.config_problems,
     )
+    if getattr(args, "ask", None):
+        from . import healthagent
+
+        result = healthagent.ask(data, args.ask, cfg.runtime)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result.get("ok") else 1
     if args.json:
         print(json.dumps(data, ensure_ascii=False))
         return 0

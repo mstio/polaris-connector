@@ -17,7 +17,8 @@ The widget shows:
   project folder
 - **a health check:** capture, project separation, curation, storage and
   backup, machine memory, security and updates, plus disk, failed systemd
-  units, battery and crashes
+  units, battery and crashes; with each problem **Ask agent** (opens your
+  agent with the message, it checks and proposes before changing anything)
 
 ## Requirements
 
@@ -69,6 +70,11 @@ The widget is a thin UI; all logic stays in the `polaris-curator` CLI.
   arguments; no shell command is built from UI data. The result goes to
   `~/.local/state/polaris/manual-run.json`, the log to
   `journalctl --user -u polaris-curator-manual`.
+- **Ask agent** passes only the message id (`run-action ask-agent <id>`);
+  `polaris-curator health --ask` rebuilds the message from a fresh health
+  check and opens your agent (the curator's runtime, `claude` or `codex`) via
+  `omarchy-launch-tui` as an argument list. The agent is told to check, to
+  ask before changing anything, and to treat the message as data.
 - Opening files uses `xdg-open`. No root, no network access of its own, no
   changes to your configuration.
 

@@ -146,7 +146,7 @@ class TestChatgptArchive(unittest.TestCase):
 
     def test_no_chat_sources_omits_browser_checks(self):
         optional = ("check_separation", "check_journals", "check_curation",
-                    "check_curator_timer", "check_llm", "check_backup", "check_mount",
+                    "check_curator_timer", "check_llm", "check_backup", "check_backup_integrity", "check_repos", "check_mount",
                     "check_memory", "check_security", "check_widget", "check_update")
         patches = [patch.object(sh, name, return_value=None) for name in optional]
         patches += [patch.object(sh, "check_system", return_value=[]),
@@ -320,6 +320,7 @@ class TestCollect(unittest.TestCase):
         with patch.object(sh, "check_archive", return_value=ok), patch.object(sh, "check_extension", return_value=err), \
              patch.object(sh, "check_native_host", return_value=ok), patch.object(sh, "check_curator_timer", return_value=ok), \
              patch.object(sh, "check_backup", return_value=ok), patch.object(sh, "check_mount", return_value=ok), \
+             patch.object(sh, "check_backup_integrity", return_value=None), patch.object(sh, "check_repos", return_value=None), \
              patch.object(sh, "check_system", return_value=[ok]), \
              patch.object(sh, "check_claude_archive", return_value=ok), \
              patch.object(sh, "check_separation", return_value=ok), \
@@ -373,6 +374,127 @@ class TestWidgetCheck(unittest.TestCase):
     def test_not_installed_gives_no_line(self):
         src, active = self._dirs()
         self.assertIsNone(sh.check_widget(src, active.parent / "fehlt"))
+
+
+class TestNewChecks(unittest.TestCase):
+    """Hinweise auf Uebersehenes (seit 2026-11-05)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.d = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _integrity(self, data):
+        f = self.d / "integrity-status.json"
+        f.write_text(json.dumps(data) if isinstance(data, dict) else data)
+        with patch.object(sh, "BACKUP_INTEGRITY", f):
+            return sh.check_backup_integrity()
+
+    def test_integrity_missing_file_no_line(self):
+        with patch.object(sh, "BACKUP_INTEGRITY", self.d / "none.json"):
+            self.assertIsNone(sh.check_backup_integrity())
+
+    def test_integrity_problems_are_errors(self):
+        c = self._integrity({"problems": ["changed: index.json"], "unrecorded": []})
+        self.assertEqual(c["level"], "error")
+        self.assertIn("changed: index.json", c["detail"])
+
+    def test_integrity_unrecorded_warns(self):
+        self.assertEqual(self._integrity({"problems": [], "unrecorded": ["snap-1"]})["level"], "warn")
+
+    def test_integrity_clean_ok(self):
+        self.assertEqual(self._integrity({"problems": [], "unrecorded": []})["level"], "ok")
+
+    def test_integrity_unreadable_warns(self):
+        self.assertEqual(self._integrity("{kaputt")["level"], "warn")
+
+    def _repos(self, repos, untracked_now=None):
+        snaps = self.d / "snapshots"
+        (snaps / "s-new").mkdir(parents=True, exist_ok=True)
+        (snaps / "s-new" / "manifest.json").write_text(json.dumps({"repos": repos}))
+        state = self.d / "state.json"
+        state.write_text(json.dumps({"snapshots": [{"name": "s-old", "created_at": "2026-11-01T00:00:00"},
+                                                   {"name": "s-new", "created_at": "2026-11-05T00:00:00"}]}))
+        with patch.object(sh, "BACKUP_STATE", state), patch.object(sh, "BACKUP_SNAPSHOTS", snaps), \
+                patch.object(sh, "HOME", Path("/home/u")), \
+                patch.object(sh, "_untracked_now", side_effect=lambda p: untracked_now):
+            return sh.check_repos()
+
+    def test_repos_names_path_and_file(self):
+        c = self._repos([{"path": ".config/x/hist", "untracked": 1}, {"path": "Projects/c", "untracked": 0}],
+                        untracked_now=["neu.md"])
+        self.assertEqual(c["level"], "warn")
+        self.assertIn("~/.config/x/hist/neu.md", c["detail"])
+        self.assertIn("committen", c["detail"])
+        self.assertNotIn("Projects/c", c["detail"])
+        self.assertEqual(c["command"], "git -C ~/.config/x/hist add -- neu.md && "
+                                       "git -C ~/.config/x/hist commit -m 'Neue Dateien sichern: neu.md'")
+
+    def test_repos_command_quotes_hostile_file_names(self):
+        c = self._repos([{"path": "r", "untracked": 1}], untracked_now=["a; rm -rf ~"])
+        self.assertIn("add -- 'a; rm -rf ~'", c["command"])
+
+    def test_repos_many_files_shortened(self):
+        c = self._repos([{"path": "a", "untracked": 5}], untracked_now=[f"f{i}" for i in range(5)])
+        self.assertIn("und 2 weitere", c["detail"])
+
+    def test_repos_resolved_since_snapshot_ok(self):
+        c = self._repos([{"path": "a", "untracked": 1}], untracked_now=[])
+        self.assertEqual(c["level"], "ok")
+        self.assertIn("nächste Snapshot", c["detail"])
+
+    def test_repos_unverifiable_falls_back_to_count(self):
+        c = self._repos([{"path": "a", "untracked": 2}], untracked_now=None)
+        self.assertEqual(c["level"], "warn")
+        self.assertIn("~/a (2 Datei(en))", c["detail"])
+
+    def test_repos_missing_warns_with_hint(self):
+        c = self._repos([{"path": "Projects/b", "missing": True}])
+        self.assertEqual(c["level"], "warn")
+        self.assertIn("~/Projects/b", c["detail"])
+        self.assertIn("paths.conf", c["detail"])
+
+    def test_repos_clean_ok(self):
+        self.assertEqual(self._repos([{"path": "Projects/a", "untracked": 0}])["level"], "ok")
+
+    def test_repos_without_backup_no_line(self):
+        with patch.object(sh, "BACKUP_STATE", self.d / "none.json"):
+            self.assertIsNone(sh.check_repos())
+
+    def test_untracked_now_refuses_paths_outside_home(self):
+        with patch.object(sh, "HOME", self.d / "home"):
+            (self.d / "home").mkdir()
+            self.assertIsNone(sh._untracked_now(Path("/etc")))
+
+    def test_reboot_needed(self):
+        mods = self.d / "modules"
+        (mods / "1.0-alt").mkdir(parents=True)
+        with patch.object(sh, "MODULES_DIR", mods):
+            self.assertEqual(sh.check_reboot()["level"], "warn")
+            (mods / os.uname().release).mkdir()
+            self.assertIsNone(sh.check_reboot())
+
+    def _btrfs(self, text):
+        dev = self.d / "btrfs" / "117446aa-uuid" / "devinfo" / "1"
+        dev.mkdir(parents=True)
+        (dev / "error_stats").write_text(text)
+        with patch.object(sh, "BTRFS_SYSFS", self.d / "btrfs"):
+            return sh.check_disk_errors()
+
+    def test_disk_errors_reported(self):
+        items = self._btrfs("write_errs 0\nread_errs 3\ncorruption_errs 1\n")
+        self.assertEqual(items[0]["level"], "error")
+        self.assertIn("read_errs 3", items[0]["detail"])
+        self.assertIn("corruption_errs 1", items[0]["detail"])
+
+    def test_disk_without_errors_ok(self):
+        self.assertEqual(self._btrfs("write_errs 0\nread_errs 0\n")[0]["level"], "ok")
+
+    def test_no_btrfs_no_line(self):
+        with patch.object(sh, "BTRFS_SYSFS", self.d / "none"):
+            self.assertEqual(sh.check_disk_errors(), [])
 
 
 if __name__ == "__main__":
@@ -452,13 +574,23 @@ class TestOptionalParts(unittest.TestCase):
 
 
 class TestLlmCheck(unittest.TestCase):
-    def _check(self, which, **kw):
+    def _check(self, which, sandbox_problem=None, **kw):
         from polaris_curator import config as config_mod
+        from polaris_curator import sandbox
         from polaris_curator.config import CuratorConfig
 
+        # Sandbox-Zustand fest vorgeben: der Test soll nicht von bwrap auf dem
+        # Testrechner abhaengen (gepatchtes shutil.which meldete es als fehlend).
         with patch.object(config_mod, "load_config", return_value=CuratorConfig(**kw)), \
-                patch("shutil.which", side_effect=which):
+                patch("shutil.which", side_effect=which), \
+                patch.object(sandbox, "status", return_value=sandbox_problem):
             return sh.check_llm()
+
+    def test_sandbox_problem_warns(self):
+        c = self._check(lambda b: "/x/claude" if b == "claude" else None, runtime="claude", model="opus",
+                        fallback_model=None, sandbox_problem="bubblewrap (bwrap) fehlt")
+        self.assertEqual(c["level"], "warn")
+        self.assertIn("bwrap", c["detail"])
 
     def test_main_cli_missing_is_error(self):
         c = self._check(lambda b: None, runtime="codex")

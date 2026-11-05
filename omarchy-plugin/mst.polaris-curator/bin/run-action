@@ -90,6 +90,11 @@ case "$action" in
     setsid -f xdg-open "$target" >/dev/null 2>&1
     jq -n --arg target "$target" '{ok:true, opened:$target}'
     ;;
+  ask-agent)
+    # Health-Check-Meldung an den Standard-Agenten (seit 2026-11-05). Nur die
+    # Meldungs-ID geht weiter; den Auftrag baut polaris-curator selbst.
+    "$CLI" health --ask "$project" 2>/dev/null || true
+    ;;
   *)
     jq -n --arg action "$action" '{ok:false, error:("Unknown action: " + $action)}'
     ;;

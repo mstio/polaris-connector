@@ -27,6 +27,7 @@ Panel {
   property var timerState: ({})
   property var health: ({})
   property var systemHealth: ({})
+  property string askingId: ""
   // Sprache aus curator.yaml (language: de|en), geliefert von status-json.
   property string lang: "de"
 
@@ -99,11 +100,22 @@ Panel {
     "manueller Lauf": "manual run",
     "Health-Check": "Health check",
     "konnte nicht ermittelt werden – polaris-curator health im Terminal ausführen": "could not be determined – run polaris-curator health in a terminal",
-    "Status pausiert, solange der Bildschirm gesperrt ist": "Status paused while the screen is locked"
+    "Status pausiert, solange der Bildschirm gesperrt ist": "Status paused while the screen is locked",
+    "Agent fragen": "Ask agent",
+    "Agent wird geöffnet…": "Opening agent…"
   })
 
   function t(de) {
     return root.lang === "en" && root.en[de] !== undefined ? root.en[de] : de
+  }
+
+  // Health-Check-Meldung: Standard-Agent prueft sie (sicherer als einen
+  // Befehl direkt auszufuehren). Nur die ID geht an run-action.
+  function askAgent(id) {
+    if (askProc.running) return
+    root.askingId = id
+    askProc.command = [root.pluginDir + "/bin/run-action", "ask-agent", id]
+    askProc.running = true
   }
 
   function pendingUnits() {
@@ -301,6 +313,21 @@ Panel {
   }
 
   Process {
+    id: askProc
+    stdout: StdioCollector { id: askStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.askingId = ""
+      try {
+        var data = JSON.parse(String(askStdout.text || "{}"))
+        if (data.ok !== true) {
+          root.lastResultOk = false
+          root.lastResult = String(data.error || "")
+        }
+      } catch (e) {}
+    }
+  }
+
+  Process {
     id: actionProc
     stdout: StdioCollector { id: actionStdout; waitForEnd: true }
     onExited: function(exitCode) {
@@ -489,6 +516,25 @@ Panel {
                     color: modelData.level === "ok" ? Commons.Color.muted : root.levelColor(modelData.level)
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
+                  }
+                  RowLayout {
+                    visible: modelData.level !== "ok"
+                    spacing: Style.spacing.md
+                    Text {
+                      text: root.askingId === modelData.id ? root.t("Agent wird geöffnet…") : "↗ " + root.t("Agent fragen")
+                      textFormat: Text.PlainText
+                      color: Commons.Color.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.underline: askArea.containsMouse
+                      MouseArea {
+                        id: askArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.askAgent(modelData.id)
+                      }
+                    }
                   }
                 }
               }

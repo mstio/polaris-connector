@@ -8,6 +8,17 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Widget 0.3.2: „Agent fragen“ (2026-11-05):** Bei jeder auffälligen
+  Health-Check-Zeile öffnet „Agent fragen“ den Standard-Agenten (Laufzeit
+  des Curators) mit der Meldung und, wo bekannt, einem passenden Befehl als
+  Vorschlag; er prüft und schlägt vor, ändert aber erst nach Zustimmung
+  etwas. Neu:
+  `polaris-curator health --ask <id>`. Meldung „Repos“ nennt Pfad und Datei.
+- **Health Check: Hinweise auf Übersehenes (2026-11-05):** neue Teile
+  „Backup-Ziel“ (Befunde der Zielprüfung von omarchy-backup sofort, nicht
+  erst nach `doctor`), „Repos“ (neue, nicht versionierte Dateien in
+  gesicherten Repos fehlen im Backup), „Neustart“ (Kernel aktualisiert) und
+  „Plattenfehler“ (btrfs-Fehlerzähler). Lesen nur lokale Dateien.
 - **Widget 0.3.1 (2026-11-05):** zeigt fremde Texte (Dateinamen, Radar,
   Fehlermeldungen der Modell-CLI) nur noch als reinen Text, nie als HTML
   (Härtung vom 04.11. jetzt auch im Marktplatz-Repo `mst.polaris-curator`).
