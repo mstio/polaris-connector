@@ -64,7 +64,10 @@ FORMAT_LINE = re.compile(
     r"|^\*\*[^*]{1,40}\*\*$"                                           # Feldname in decisions.md
     r"|^[KDL]\d+$|^\d{4}-\d\d-\d\d$"                                    # ID bzw. Datum allein
     r"|^(Aktiv|Abgelöst|Ersetzt|lokal|vorläufig|Pilot/Test|dauerhaft|unternehmensweiter Standard"
-    r"|Ja|Nein \(noch nicht (überprüft|bestätigt)\))$")                  # feste Feldwerte
+    r"|Ja|Nein \(noch nicht (überprüft|bestätigt)\))$"                   # feste Feldwerte
+    # Vorspann von knowledge-archiv.md (compact.py, merge.py), wortgleich im Code
+    r"|^(Vom Verdichtungslauf als|Abgelöste und als) überholt markierte Einträge aus `knowledge\.md` "
+    r"\(nicht gelöscht, nur verschoben\)\. Automatisch gepflegt von Polaris Curator\.$")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*$")
 POLARIS_HEADINGS = {h.casefold() for h in (
     # Abschnitte des Curators (prompts.py "Sektionsnamen", open-loops, decisions)

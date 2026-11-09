@@ -19,7 +19,7 @@ const OHNE_PROJEKT = 'Dieser Chat gehört zu keinem Projekt und wird nicht archi
 
 // Laedt popup.js mit nachgebautem DOM und Browser-API. tab = aktiver Tab
 // (null: keiner), context = Antwort auf get-context.
-function loadPopup({ tab = null, context = null } = {}) {
+function loadPopup({ tab = null, context = null, stored = {} } = {}) {
   const elements = {};
   const element = (id) => {
     if (!elements[id]) {
@@ -41,10 +41,10 @@ function loadPopup({ tab = null, context = null } = {}) {
   const browser = {
     tabs: { query: async () => (tab ? [tab] : []) },
     runtime: { sendMessage: (_msg, cb) => cb(context) },
-    storage: { local: { get: (defaults, cb) => cb(defaults), set: (_p, cb) => cb() } },
+    storage: { local: { get: (defaults, cb) => cb({ ...defaults, ...structuredClone(stored) }), set: (_p, cb) => cb() } },
     permissions: { contains: async () => true, request: async () => true },
   };
-  const sandbox = { browser, document: { getElementById: element }, console, URL };
+  const sandbox = { browser, document: { getElementById: element }, console, URL, Date };
   vm.createContext(sandbox);
   vm.runInContext(SRC, sandbox);
   return { sandbox, element };
@@ -74,4 +74,44 @@ test('Popup zeigt auf der Projektuebersicht den Hinweis an', async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(element('no-project').classList.contains('hidden'), false);
   assert.equal(element('no-project-text').textContent, UEBERSICHT);
+});
+
+// Seit 0.4.5: zwei Zeilen "dieser Chat" und "Projekt" (2026-11-09).
+test('formatTime: heute nur Uhrzeit, sonst mit Datum', () => {
+  const { sandbox } = loadPopup();
+  const heute = new Date();
+  heute.setHours(9, 5, 0, 0);
+  assert.equal(sandbox.formatTime(heute.toISOString()).includes('.'), false);
+  const frueher = new Date(2026, 10, 5, 9, 43).toISOString();
+  assert.match(sandbox.formatTime(frueher), /05\.11\./);
+  assert.equal(sandbox.formatTime(null), '-');
+});
+
+async function renderProject(stored) {
+  const ctx = { projectId: 'claude-p-1', projectName: 'Protokolle', conversationId: 'c-offen' };
+  const { element } = loadPopup({ tab: { id: 1, url: 'https://claude.ai/chat/c-offen' }, context: ctx, stored });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return element;
+}
+
+test('Popup zeigt Chat- und Projektzeit getrennt', async () => {
+  const element = await renderProject({
+    lastExport: { 'claude-p-1': new Date(2026, 10, 9, 10, 29).toISOString() },
+    lastExportChat: { 'c-offen': new Date(2026, 10, 5, 9, 43).toISOString(), 'c-anderer': new Date(2026, 10, 9, 10, 29).toISOString() },
+  });
+  assert.match(element('last-export-chat').textContent, /05\.11\./);
+  assert.match(element('last-export').textContent, /09\.11\.|10:29/);
+});
+
+test('Popup: Chatzeit aus der Exportliste, solange noch kein eigener Vermerk da ist', async () => {
+  const element = await renderProject({
+    exportedMessages: { 'c-offen': { ids: ['m1'], at: new Date(2026, 10, 5, 9, 43).getTime() } },
+  });
+  assert.match(element('last-export-chat').textContent, /05\.11\./);
+});
+
+test('Popup: Chat noch nie exportiert', async () => {
+  const element = await renderProject({ lastExportChat: { 'c-anderer': new Date().toISOString() } });
+  assert.equal(element('last-export-chat').textContent, '-');
 });

@@ -20,10 +20,16 @@ function setSettings(partial) {
   return new Promise((resolve) => api().storage.local.set(partial, resolve));
 }
 
-function formatTime(iso) {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+// Heute nur die Uhrzeit, sonst mit Datum: "09:43" allein las sich bei einem
+// Export von vor Tagen wie "vorhin" (2026-11-09).
+function formatTime(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}. ${time}`;
 }
 
 function renderApi(context, enabled) {
@@ -86,8 +92,15 @@ async function render() {
   document.getElementById('exclude-toggle').checked = !!settings.excludedConversations[
     activeConversationId
   ];
-  const { lastExport } = await new Promise((resolve) => api().storage.local.get({ lastExport: {} }, resolve));
-  document.getElementById('last-export').textContent = formatTime(lastExport[activeProjectId] || proj.lastExport);
+  const stored = await new Promise((resolve) =>
+    api().storage.local.get({ lastExport: {}, lastExportChat: {}, exportedMessages: {} }, resolve)
+  );
+  document.getElementById('last-export').textContent = formatTime(stored.lastExport[activeProjectId] || proj.lastExport);
+  // Vor 0.4.5 gab es keinen Vermerk je Chat; bis zum naechsten Export dient der
+  // Zeitpunkt aus der "schon exportiert"-Liste (nur Nachrichten-Exporte).
+  const chatAt = (activeConversationId && stored.lastExportChat[activeConversationId]) ||
+    (activeConversationId && stored.exportedMessages[activeConversationId] && stored.exportedMessages[activeConversationId].at);
+  document.getElementById('last-export-chat').textContent = formatTime(chatAt);
   renderMapping(proj.name || context.projectName);
 }
 

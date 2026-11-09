@@ -186,3 +186,37 @@ test('Speicherwaechter: ohne Native Host keine Meldung an die Tabs', async () =>
   await e.fireAlarm();
   assert.deepEqual(e.tabMessages, []);
 });
+
+// Seit 0.4.5: "Last export" je Chat, nicht nur je Projekt (Popup zeigte die
+// Zeit eines anderen Chats im selben Projekt, 2026-11-09).
+test('Letzter Export wird je Chat und je Projekt vermerkt', async () => {
+  const e = env();
+  await e.exportEvents([ev('c1', 'm1'), ev('c2', 'm2')]);
+  assert.ok(e.storage.lastExport['g-p-1']);
+  assert.ok(e.storage.lastExportChat.c1);
+  assert.ok(e.storage.lastExportChat.c2);
+  assert.equal(e.storage.lastExportChat.c3, undefined);
+});
+
+test('Ohne neue Nachrichten bleibt der Chat-Zeitstempel unveraendert', async () => {
+  const e = env();
+  await e.exportEvents([ev('c1', 'm1')]);
+  const first = e.storage.lastExportChat.c1;
+  await e.wait(5);
+  await e.exportEvents([ev('c1', 'm1')]);
+  assert.equal(e.storage.lastExportChat.c1, first);
+});
+
+test('Abbild vermerkt den Chat aus dem Hinweis', async () => {
+  const e = env();
+  await e.exportSnapshot({ conversation: { conversation_id: 'c9' }, hint: { project_id: 'g-p-1', conversation_id: 'c9' } });
+  assert.ok(e.storage.lastExportChat.c9);
+  assert.ok(e.storage.lastExport['g-p-1']);
+});
+
+test('Gleichzeitige Vermerke verlieren keine Chats', async () => {
+  const e = env();
+  await Promise.all([e.exportEvents([ev('c1', 'a')]), e.exportEvents([ev('c2', 'b')]), e.exportEvents([ev('c3', 'c')])]);
+  await e.wait(50);
+  assert.deepEqual(Object.keys(e.storage.lastExportChat).sort(), ['c1', 'c2', 'c3']);
+});

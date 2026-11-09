@@ -237,11 +237,46 @@ async function downloadEvent(event) {
 // Eigener Schluessel statt projects[..].lastExport: das Zurueckschreiben des
 // ganzen projects-Objekts konnte eine gleichzeitige Sync-Umschaltung im Popup
 // rueckgaengig machen (Review Runde 2).
-async function noteLastExport(projectId) {
-  if (!projectId) return;
-  const data = await api().storage.local.get({ lastExport: {} });
-  data.lastExport[projectId] = new Date().toISOString();
-  await api().storage.local.set({ lastExport: data.lastExport });
+// Seit 0.4.5 zusaetzlich je Chat (lastExportChat): das Popup zeigte sonst die
+// Zeit eines anderen Chats im selben Projekt (2026-11-09). Nacheinander wie
+// markExported, sonst verlieren gleichzeitige Exporte ihre Vermerke.
+const LAST_EXPORT_CHAT_KEY = 'lastExportChat';
+let noteChain = Promise.resolve();
+
+function noteLastExport(projectId, conversationIds = []) {
+  const run = noteChain.then(() => noteLastExportNow(projectId, conversationIds));
+  noteChain = run.catch(() => {});
+  return run;
+}
+
+async function noteLastExportNow(projectId, conversationIds) {
+  const convs = conversationIds.filter(Boolean);
+  if (!projectId && !convs.length) return;
+  const at = new Date().toISOString();
+  const data = await api().storage.local.get({ lastExport: {}, [LAST_EXPORT_CHAT_KEY]: {} });
+  const update = {};
+  if (projectId) {
+    data.lastExport[projectId] = at;
+    update.lastExport = data.lastExport;
+  }
+  if (convs.length) {
+    const chats = data[LAST_EXPORT_CHAT_KEY] || {};
+    for (const conv of convs) chats[conv] = at;
+    const keys = Object.keys(chats);
+    if (keys.length > MAX_CONVERSATIONS) {
+      keys
+        .sort((a, b) => (chats[a] < chats[b] ? -1 : 1))
+        .slice(0, keys.length - MAX_CONVERSATIONS)
+        .forEach((k) => delete chats[k]);
+    }
+    update[LAST_EXPORT_CHAT_KEY] = chats;
+  }
+  await api().storage.local.set(update);
+}
+
+function snapshotConversationId(snapshot) {
+  const conv = snapshot.conversation || {};
+  return (snapshot.hint && snapshot.hint.conversation_id) || conv.conversation_id || conv.id || null;
 }
 
 // Chat-Abbild (seit 0.4.0): an den Native Host, sonst als Abbild-Datei in den
@@ -252,7 +287,7 @@ async function handleExportSnapshot(snapshot) {
   try {
     const reply = await sendNative({ type: 'export-snapshot', snapshot });
     if (reply && reply.ok) {
-      await noteLastExport(snapshot.hint && snapshot.hint.project_id);
+      await noteLastExport(snapshot.hint && snapshot.hint.project_id, [snapshotConversationId(snapshot)]);
       return { ok: true, native: true, counts: reply.counts };
     }
     // Die Bridge hat geantwortet und abgelehnt: das IST das Ergebnis - nicht
@@ -273,7 +308,7 @@ async function handleExportSnapshot(snapshot) {
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
-  await noteLastExport(snapshot.hint && snapshot.hint.project_id);
+  await noteLastExport(snapshot.hint && snapshot.hint.project_id, [snapshotConversationId(snapshot)]);
   return { ok: true, native: false };
 }
 
@@ -308,7 +343,9 @@ async function handleExportEvents(events) {
   for (const event of viaDownload) {
     await downloadEvent(event);
   }
-  if (fresh.length > 0) await noteLastExport(fresh[0].project?.id);
+  if (fresh.length > 0) {
+    await noteLastExport(fresh[0].project?.id, [...new Set(fresh.map((e) => e.conversation?.id))]);
+  }
   return {
     downloaded: fresh.length,
     native: viaNative,

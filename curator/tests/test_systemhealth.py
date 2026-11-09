@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest.mock
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 import conftest_helpers  # noqa: F401 - sys.path
 
+from polaris_curator import health as archive_health
 from polaris_curator import systemhealth as sh
 
 
@@ -109,8 +111,16 @@ class TestBackupCheck(unittest.TestCase):
 
 class TestChatgptArchive(unittest.TestCase):
     def test_without_chatgpt_message_is_neutral_when_check_is_off(self):
-        with tempfile.TemporaryDirectory() as t:
-            c = sh.check_archive({"a": Path(t)}, 0)
+        # Alle Bridge-Pfade des Moduls in ein leeres Verzeichnis: sonst las der
+        # Test den echten Erfassungsstatus (z. B. ein HTTP 429) und wurde gelb.
+        with tempfile.TemporaryDirectory() as t, tempfile.TemporaryDirectory() as state:
+            home = archive_health.HOME
+            paths = {k: v for k, v in vars(archive_health).items()
+                     if k.isupper() and isinstance(v, Path) and home in v.parents}
+            with ExitStack() as stack:
+                for k, v in paths.items():
+                    stack.enter_context(patch.object(archive_health, k, Path(state) / v.relative_to(home)))
+                c = sh.check_archive({"a": Path(t)}, 0)
             self.assertEqual(c["level"], "ok")
             self.assertIn("noch keine", c["detail"])
 

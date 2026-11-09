@@ -131,6 +131,41 @@ class PrivacyCheckTest(unittest.TestCase):
         r = self.run_check(fmt)
         self.assertEqual(r.returncode, 0, r.stdout)
 
+    def test_archive_preamble_is_not_fingerprinted(self):
+        # Vorspann von knowledge-archiv.md (compact.py, merge.py): steht in jedem
+        # verdichteten Projekt, auch im geschuetzten, und wortgleich im Code.
+        pre = ("Vom Verdichtungslauf als überholt markierte Einträge aus `knowledge.md` "
+               "(nicht gelöscht, nur verschoben). Automatisch gepflegt von Polaris Curator.\n"
+               "Abgelöste und als überholt markierte Einträge aus `knowledge.md` "
+               "(nicht gelöscht, nur verschoben). Automatisch gepflegt von Polaris Curator.\n")
+        (self.geheim / "knowledge-archiv.md").write_text("# Wissensarchiv\n\n" + pre)
+        self.protect_by_marker()
+        code = ('    "Vom Verdichtungslauf als überholt markierte Einträge aus `knowledge.md` "\n'
+                '    "(nicht gelöscht, nur verschoben). Automatisch gepflegt von Polaris Curator.\\n"\n')
+        r = self.run_check(code, name="compact.py")
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_archive_preamble_exemption_is_exact(self):
+        # Eigener Text in derselben Form bleibt geschuetzt.
+        line = ("Vom Verdichtungslauf als überholt markierte Einträge aus `knowledge.md` "
+                "(nicht gelöscht, nur verschoben). Dazu die Wohnung in der Beispielstraße zwölf.\n")
+        (self.geheim / "knowledge-archiv.md").write_text(line)
+        self.protect_by_marker()
+        r = self.run_check("Notiz: Wohnung in der Beispielstraße zwölf bleibt.\n")
+        self.assertEqual(r.returncode, 1, r.stdout)
+
+    def test_archive_preamble_with_private_suffix_or_prefix_stays_protected(self):
+        # Review Fable 2026-11-09: Anker ^ und $ einzeln nachweisen.
+        pre = ("Vom Verdichtungslauf als überholt markierte Einträge aus `knowledge.md` "
+               "(nicht gelöscht, nur verschoben). Automatisch gepflegt von Polaris Curator.")
+        for line in (pre + " Dazu die Wohnung in der Beispielstraße zwölf.",
+                     "Wohnung in der Beispielstraße zwölf. " + pre):
+            with self.subTest(line=line[:30]):
+                (self.geheim / "knowledge-archiv.md").write_text(line + "\n")
+                self.protect_by_marker()
+                r = self.run_check(line + "\n")
+                self.assertEqual(r.returncode, 1, r.stdout)
+
     def test_marker_file_in_tree_is_a_hit(self):
         r = self.run_check("", name=".polaris-protected")
         self.assertEqual(r.returncode, 1)

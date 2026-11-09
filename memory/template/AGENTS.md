@@ -61,6 +61,10 @@
   - Dem Prüfer Diff, Ziel und Risiken geben, nicht das eigene Urteil.
   - Befunde selbst nachprüfen; Ergebnis und Folgen in der Abschlussmeldung nennen.
   - Ist kein stärkeres Modell erreichbar: dem Nutzer ausdrücklich als offenen Punkt melden.
+  - **Immer, vor dem Commit** (Nutzervorgabe 2026-11-07, nach 10 von 10 Prüfungen mit echten Funden): bei Änderungen an Schutzfunktionen, am Update-Weg oder an der Integrität von Daten.
+  - **Bei Meilensteinen zusätzlich ein Gremium anderer Anbieter** (neue Architekturentscheidung, Abschluss einer Stufe, Veröffentlichung): nur lesend, auf einer Momentaufnahme ohne Git-Historie nach Privatsphäre-Prüfung; andere Anbieter fanden Lücken, die das stärkste Modell als vertretbar eingestuft hatte.
+  - Etwa jeder zehnte Befund war falsch oder überzogen: jeden am Code nachprüfen, übernommene und verworfene Befunde im Commit nennen. Routineänderungen ausgenommen.
+  - Im Gremium jedem Prüfer zusätzlich eine Technik aus dem Skill `perspektivwechsel` geben (z. B. Kopfstand, Prä-mortem, bei Entscheidungen Tetralemma), um auch Fehlendes zu finden, nicht nur Fehler (Erprobung seit 2026-11-07).
 
 ## Verbindliche Dokumentation persistenter Eingriffe
 - Persistente Änderungen am Rechner im selben Arbeitsgang dokumentieren. Erst wenn die Dokumentation geschrieben und gegen den tatsächlichen Zustand geprüft ist, gilt die Aufgabe als abgeschlossen.
@@ -106,6 +110,10 @@
 - Vor größeren Änderungen README-, AGENTS.md- und Projektdokumentation lesen.
 - Vor Änderungen `git status` und vorhandene Diffs prüfen.
 - Fremde, nicht zur Aufgabe gehörende Änderungen nicht überschreiben.
+- **Mehrere Agentensitzungen am selben Repo** (seit 2026-11-08): Fremde, nicht committete Änderungen in `git status` können von einer laufenden Sitzung stammen.
+  - Nur eigene Pfade stagen (`git add <pfad>`), nie `git add -A` oder `commit -a`, solange fremde Änderungen da sind; fremde Dateien nicht anfassen, nicht zurücksetzen.
+  - Arbeiten zwei Sitzungen gleichzeitig daran: Dateien vorher aufteilen und abstimmen (Nachricht an die andere Sitzung oder über den Nutzer); dieselbe Datei nie gleichzeitig bearbeiten, bei Überschneidung eigener Zweig bzw. `git worktree`.
+  - Push und Live-Schaltung macht nur eine Sitzung, nach vollständigem Testlauf auf dem gemeinsamen Stand.
 - Beim Fortsetzen einer Aufgabe den Index `~/.config/ai-agents/AI_HANDOFF.md` und die passende Themendatei lesen.
 - Vor `git push` oder dem Anlegen eines Repos prüfen, ob Ziel-Repo und Adressat (privat oder öffentlich) wirklich gewollt sind; eine Berechtigung ersetzt keine inhaltliche Prüfung.
 - **Impulse anderer Nutzer kenntlich machen** (Nutzervorgabe 2026-11-04): Setzen wir Vorschläge oder Befunde anderer um, das offen sagen: im Commit (Trailer `Suggested-by: <Name>`), in der Doku (README/Changelog) und als kurzer Code-Kommentar an der umgesetzten Stelle.

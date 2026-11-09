@@ -8,6 +8,16 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+## 0.4.5 (2026-11-09)
+
+- **„Letzter Export“ je Chat:** Das Popup zeigte unter „Last export“ die Zeit
+  des Projekts, also auch Exporte aus anderen Chats desselben Projekts; ein
+  seit Tagen ruhender Chat wirkte so wie „vor Minuten synchronisiert“. Jetzt
+  zwei Zeilen: „dieser Chat“ und „Projekt“, bei Exporten vor heute mit Datum.
+  Bis zum ersten neuen Export nimmt die Chat-Zeile den Zeitpunkt aus der
+  „schon exportiert“-Liste (bei ChatGPT-Abbildern „-“). Nacharbeit: keine,
+  Firefox aktualisiert die Erweiterung selbst.
+
 - **Rückmeldungen von bernhard2804 (2026-11-05):**
   - `polaris update`: Der Health Check am Ende meldete noch „Update
     verfügbar“; der Zustand wird jetzt vorher geschrieben (Test neu).

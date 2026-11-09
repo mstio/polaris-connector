@@ -44,6 +44,7 @@ Dann genau das tun:
   - Unsichere Ursache → Versuchsplanung: eine Variable je Lauf, Vorher/Nachher unter gleichen Bedingungen.
   - Betrieb einer Änderung → Reliability Engineering: zuerst im Kleinen einführen, Rückbaupfad, beobachtbares Erfolgskriterium.
 - Bewährte Verfahren übernehmen, keine neuen Abhängigkeiten (Konzepte, nicht Technik).
+- Den Raum der Wege bewusst erweitern (Kopfstand, Prä-mortem, Tetralemma, zirkuläre Fragen, Wunderfrage, laterale Provokation): Skill `perspektivwechsel` (`skills/perspektivwechsel/SKILL.md`), vor allem bei Entscheidungen, Meilensteinen und festgefahrenen Fragen.
 
 ## 4. Alternativen und eine Empfehlung
 
