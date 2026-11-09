@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from . import layout, office_extract, state as state_mod, storage
-from . import sandbox
+from . import sandbox, usage
 
 logger = logging.getLogger("polaris_curator")
 
@@ -35,6 +35,10 @@ logger = logging.getLogger("polaris_curator")
 # Mail-Anhaenge gleichermassen (plus .eml fuer Inbox-Dateien).
 TEXT_SUFFIXES = {".pdf", ".docx", ".xlsx", ".xlsm", ".pptx", ".csv", ".md", ".txt"}
 SUPPORTED_SUFFIXES = TEXT_SUFFIXES | {".eml"}
+# Groessengrenzen fuer Fremdinhalt (ADR 004, Schritt 0, 2026-11-07): eine einzelne
+# Datei bzw. ein Anhang und eine ganze Mail; darueber bleibt die Datei liegen.
+MAX_DOCUMENT_BYTES = 50 * 2**20
+MAX_EML_BYTES = 100 * 2**20
 # Bildformate, die als Bild an das Modell gehen koennen (codex exec --image).
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
@@ -129,6 +133,8 @@ def _extract_pdf_bytes(data: bytes) -> str:
         # Fremde PDFs (Mail-Anhaenge) ohne Netz und ohne Sicht aufs Home
         # parsen: poppler hat immer wieder Speicherfehler (Sicherheitspruefung
         # 2026-11-04).
+        # SandboxUnavailable (fail-closed) geht unveraendert nach oben: das PDF
+        # bzw. die Mail bleibt liegen und kommt spaeter dran.
         result = subprocess.run(
             sandbox.wrap(["pdftotext", "-layout", tmp.name, "-"], ro=[tmp.name]),
             capture_output=True,
@@ -143,6 +149,9 @@ def _extract_pdf_bytes(data: bytes) -> str:
 def text_from_bytes(filename: str, data: bytes) -> str:
     """Extrahiert Text aus einer Datei anhand ihrer Endung (ohne .eml)."""
     suffix = Path(filename).suffix.lower()
+    usage.mark(f"doc:{suffix or 'none'}")  # Nutzungszaehler (ADR 003)
+    if len(data) > MAX_DOCUMENT_BYTES:  # Fremdinhalt: Speicher begrenzen (ADR 004, Schritt 0)
+        raise ValueError(f"{filename} zu gross ({len(data)} Bytes, Grenze {MAX_DOCUMENT_BYTES})")
     if suffix == ".pdf":
         return _extract_pdf_bytes(data)
     if suffix == ".docx":
@@ -224,6 +233,8 @@ def _classify_attachments(
         if suffix in TEXT_SUFFIXES:
             try:
                 text = text_from_bytes(filename, data).strip()
+            except sandbox.SandboxUnavailable:
+                raise  # ganze Mail bleibt liegen, statt ohne Anhangtext kuratiert zu werden
             except Exception as exc:  # noqa: BLE001 - ein kaputter Anhang darf die Mail nicht blockieren
                 logger.warning("Anhang %s nicht lesbar: %s", filename, exc)
                 attachments.append(Attachment(filename, content_type, data, "stored", "nicht lesbar"))
@@ -378,7 +389,10 @@ def load_new_documents(
 
             attachments: list[Attachment] = []
             try:
+                if path.stat().st_size > MAX_EML_BYTES:
+                    raise ValueError(f"zu gross ({path.stat().st_size} Bytes, Grenze {MAX_EML_BYTES})")
                 if path.suffix.lower() == ".eml":
+                    usage.mark("doc:.eml")
                     text, attachments = _extract_eml(path, limits, known)
                 else:
                     text = text_from_bytes(path.name, path.read_bytes())

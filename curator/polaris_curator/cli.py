@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -904,7 +905,9 @@ def cmd_retract(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    usage.count(f"cli:{args.command}")
+    # Aus dem Widget (status-json, run-action) getrennt zaehlen (ADR 003).
+    via = "widget:" if os.environ.get("POLARIS_USAGE_VIA") == "widget" else ""
+    usage.count(f"{via}cli:{args.command}")
     return args.func(args)
 
 

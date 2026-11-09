@@ -62,7 +62,9 @@ The widget is a thin UI; all logic stays in the `polaris-curator` CLI.
   `polaris-curator health --json` plus the timer state (`systemctl --user
   show`). It runs when the panel opens or refreshes, not on a timer. While the
   screen is locked it shows the last state instead of touching project
-  folders.
+  folders. That last state may contain conversation titles, so it is kept in
+  `$XDG_STATE_HOME/polaris/widget-status.json` readable only by you (file
+  `0600`, directory `0700`, also for `manual-run.json`); thanks to HANCORE-linux for the review (#13877).
 - `bin/run-action` starts manual runs as the transient systemd user unit
   `polaris-curator-manual` (`systemd-run --user`): it survives a shell
   restart, runs in the same environment as Polaris' own timer, and the fixed

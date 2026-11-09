@@ -17,6 +17,8 @@ if command -v polaris-awake >/dev/null && ! polaris-awake; then
 fi
 
 CLI="$(command -v polaris-curator || true)"
+# Nutzungszaehler: Widget-Aufrufe getrennt von Hand-Aufrufen (ADR 003).
+export POLARIS_USAGE_VIA=widget
 if [ -z "$CLI" ]; then
   jq -n '{installed:false, error:"polaris-curator is not installed or not on PATH"}'
   exit 0
@@ -73,6 +75,12 @@ out="$(jq \
 printf '%s\n' "$out"
 
 # Letzten guten Stand fuer die Sperrzeit merken (lokal, nicht auf dem Laufwerk).
-mkdir -p "${LAST%/*}" 2>/dev/null &&
-  printf '%s\n' "$out" >"$LAST.tmp" 2>/dev/null && mv -f "$LAST.tmp" "$LAST" 2>/dev/null
+# Der Cache kann Chat-Titel enthalten: nur fuer den eigenen Benutzer (Ordner 0700,
+# auch wenn er schon mit 0755 existiert; mktemp legt die Datei mit 0600 an).
+# Nach dem Hinweis von HANCORE-linux, Marktplatz #13877, 2026-11-08.
+if mkdir -p "${LAST%/*}" 2>/dev/null && chmod 700 "${LAST%/*}" 2>/dev/null &&
+   tmp="$(mktemp "$LAST.XXXXXX" 2>/dev/null)"; then
+  if printf '%s\n' "$out" >"$tmp" 2>/dev/null; then mv -f "$tmp" "$LAST" 2>/dev/null; fi
+  rm -f "$tmp" 2>/dev/null
+fi
 exit 0

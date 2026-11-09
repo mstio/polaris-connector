@@ -8,16 +8,110 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
-## 0.4.5 (2026-11-09)
+## Zweiter Stand 2026-11-09 (Bridge, Curator, Installer; Erweiterung bleibt 0.4.5)
 
-- **„Letzter Export“ je Chat:** Das Popup zeigte unter „Last export“ die Zeit
-  des Projekts, also auch Exporte aus anderen Chats desselben Projekts; ein
-  seit Tagen ruhender Chat wirkte so wie „vor Minuten synchronisiert“. Jetzt
-  zwei Zeilen: „dieser Chat“ und „Projekt“, bei Exporten vor heute mit Datum.
-  Bis zum ersten neuen Export nimmt die Chat-Zeile den Zeitpunkt aus der
-  „schon exportiert“-Liste (bei ChatGPT-Abbildern „-“). Nacharbeit: keine,
-  Firefox aktualisiert die Erweiterung selbst.
+- **Nacharbeit vor dem Update: bubblewrap installieren** (`sudo pacman -S
+  bubblewrap`, auf Omarchy meist schon vorhanden: `command -v bwrap`). Polaris
+  verarbeitet Fremdinhalte seit diesem Stand nur noch in der Sandbox
+  (fail-closed). Ohne nutzbares bubblewrap ist der Health Check rot und
+  `polaris update` nimmt das Update automatisch zurück. `install.sh` warnt
+  jetzt bei fehlendem `bwrap`.
+- `polaris update` warnt, wenn der Health Check vor und nach dem Update nicht
+  lesbar ist (Update dann ungeprüft).
+- Anleitung „Switching from the install bundle to a git checkout“: legt
+  vorher eine vollständige Kopie des Programmordners an.
 
+- **Private Ordner nur für den eigenen Benutzer (2026-11-08):** Polaris legt
+  `~/.config/polaris`, `~/.local/share/polaris` (erfasste Chats) und
+  `~/.local/state/polaris` mit `0700` an und zieht bestehende Ordner beim
+  nächsten `polaris update` nach, ebenso einen vorhandenen
+  `~/Downloads/polaris-inbox` (Symlinks bleiben unangetastet, mit Warnung). Das
+  Widget (0.3.3) legt seinen Zwischenspeicher und `manual-run.json` nur für den
+  eigenen Benutzer an. Schützt Chat-Titel und -Inhalte, falls das Home für andere Konten
+  durchquerbar ist. Nach dem Hinweis von HANCORE-linux im
+  Omarchy-Plugin-Marktplatz (#13877). Nacharbeit: keine.
+
+- **Sicherheitsabgleich lief nicht (behoben 2026-11-08):** Der tägliche
+  Radar-Lauf startet nachts und wurde bei gesperrtem Bildschirm jedes Mal
+  übersprungen (Bedingung `polaris-awake`, gedacht für Zugriffe aufs
+  Cloud-Laufwerk, die der Radar nicht macht). Der Health Check meldete es nach
+  drei Tagen gelb. Nacharbeit: keine (`polaris update` tauscht die Unit).
+
+- **Alarmmüdigkeit messen (2026-11-08):** Der Nutzungszähler hält je
+  Health-Prüfung die Tage mit Warnung oder Fehler fest (`health-warn:<id>`,
+  `health-error:<id>`, Nenner `health:day`; nur Prüf-IDs, höchstens ein
+  Schreibvorgang je Tag). Grundlage, um am 05.12. Zeilen zu schärfen oder zu
+  streichen, die lange gelb sind, ohne dass jemand handelt.
+
+- **Befunde der Gutachten von Codex und agy umgesetzt (2026-11-07):**
+  `polaris update` zieht omarchy-backup und git-verwaltete Widgets nicht mehr
+  ungesehen nach, sondern zeigt neue Commits; übernommen wird nach Zustimmung
+  im Terminal oder mit `POLARIS_UPDATE_EXTRAS=1 polaris update`. Ein aktiver
+  Guard-Hook wird nur mit `POLARIS_ADOPT_GUARD=1` ersetzt (sonst Unterschied
+  und Hinweis). Eine aus der Sandbox erneuerte Anmeldung darf nur Tokens und
+  Zeitstempel ändern (Positivliste); eine abgelehnte Übernahme zeigt der
+  Health Check gelb. Update-Prüfung ab 3 Tagen ohne Erfolg gelb. Der
+  Ende-zu-Ende-Test läuft zusätzlich in der echten Sandbox.
+  Nacharbeit: bei neuen Widget- oder omarchy-backup-Ständen einmal
+  `POLARIS_UPDATE_EXTRAS=1 polaris update` oder `polaris update` im Terminal.
+- **Grenzen für Fremdinhalt (ADR 004, Schritt 0, 2026-11-07):** Office-Dateien
+  werden nicht entpackt, wenn sie mehr als 256 MB (ein Teil mehr als 32 MB) oder
+  über 10 000 Teile ergäben (Zip-Bombe); einzelne Dateien und Anhänge über 50 MB,
+  Mails über 100 MB bleiben liegen. Der Health Check meldet verwaiste
+  Zwischendateien des Curators (älter als ein Tag) gelb. Nacharbeit: keine.
+- **Nahtstellen-Tests (ADR 003, 2026-11-07):** Beispieldateien für das
+  Bridge-Ereignis (`tests/contracts/`, ChatGPT und Claude) laufen durch die
+  echte Bridge und werden mit dem echten Curator gelesen; ein Ende-zu-Ende-Test
+  geht über die echten Befehle (`polaris process`, `polaris-curator run`) mit
+  Fake-Modell bis `knowledge.md`, samt Störfall „Projektordner weg“.
+- **Für Agenten (ADR 003, 2026-11-07):** `AGENTS.md` im Repo (auch als
+  `CLAUDE.md`) mit Arbeitsablauf, „Wo ändere ich was?“ und der Liste der
+  Schutzdateien (Zweitmeinungspflicht); `tests/test_boundaries.py` prüft die
+  Importrichtung (Bridge und Curator importieren einander nie, der Kern weder
+  Health Check noch CLI) und die Liste gegen das Repo. Nacharbeit: keine.
+- **Schutz geschlossen (ADR 003, 2026-11-07):** Ohne nutzbares bubblewrap
+  verarbeitet Polaris keinen Fremdinhalt mehr (vorher lief es ungeschützt
+  weiter): Kuratierung und PDF-Auslesen setzen aus, der Health Check zeigt rot
+  „Sandbox nicht nutzbar – Kuratierung ausgesetzt“; bewusst ohne Sandbox nur mit
+  `POLARIS_NO_SANDBOX=1`. Eine aus der Sandbox erneuerte Anmeldung wird nur
+  zurückgeschrieben, wenn Form, Konto, Modus und Rechte gleich bleiben.
+  Zwischendateien des Curators haben eindeutige Namen. `install.sh` zeigt den
+  Unterschied und ersetzt einen aktiven Guard-Hook nur mit `POLARIS_ADOPT_GUARD=1`.
+  Nacharbeit: keine (bubblewrap bringt Omarchy mit).
+- **Health Check entlastet (ADR 003, 2026-11-07):** Projekttrennung und
+  Maschinengedächtnis rechnen nur neu, wenn sich ihre Eingaben ändern
+  (Verzeichnislisten bzw. Datei-Metadaten, keine Inhalte; spätestens nach 6 h);
+  `~/.local/state/polaris/health-cache.json`. Vorher las jeder Widget-Aufruf
+  (alle 10 min) alle Rohdaten-JSONs vom Projektlaufwerk und startete memlint;
+  `health` jetzt ~0,45 s statt ~1,7 s. Spiegelzustand und vorübergehende Fehler
+  werden nie zwischengespeichert. Die tägliche Update-Prüfung läuft losgelöst im
+  Hintergrund (Health wartet nicht mehr bis zu 70 s auf das Netz; ohne Netz
+  höchstens ein Versuch je Stunde, `update-check.attempt`); ein lange nicht
+  geprüfter Stand wird angezeigt (ab 3 Tagen gelb). Nacharbeit: keine.
+- **Nutzungszähler vollständig (ADR 003, 2026-11-07):** zählt jetzt auch
+  Bridge-Befehle (`bridge:cli:*`), Native-Host-Anfragen und archivierte Quellen
+  (`bridge:native:*`, `bridge:archive:*`), kuratierte Quellen und Dokumenttypen
+  (`source:*`, `doc:*`), Modell-Runtime und Ersatzmodelle (`llm:*`),
+  Journal-Wiederherstellung und Dokumentenverzeichnis. Widget-Aufrufe stehen
+  getrennt unter `widget:*` (bisher als `cli:health`/`cli:status-all`
+  mitgezählt). Funktionen zählen höchstens einmal je Lauf; Dateisperre gegen
+  verlorene Zählungen. Nur Namen und Anzahl, nie Inhalte. Nacharbeit: keine.
+- **`polaris update` sicherer (ADR 003, 2026-11-07):** nimmt ein Update auch
+  zurück, wenn vorher schon eine andere Prüfung rot war (Vergleich je Prüfung
+  statt Gesamtstatus); tauscht keinen Code, solange Curator oder Bridge laufen
+  (Exit 75, später erneut); die Wiederherstellung schreibt ein Protokoll
+  `~/.local/state/polaris/update-<Zeit>.log`. Tests neu.
+- **`install.sh` brach bei langen Update-Hinweisen ab** (mehr als 40 Zeilen in
+  `neu-seit-update.md`): die Gedächtnis-Werkzeuge und die Abschlussprüfung
+  liefen dann nicht. Behoben, Test neu. Nacharbeit: keine (`polaris update`
+  holt es nach).
+- **Live-Stand als git worktree** möglich (`.git` ist dort eine Datei);
+  ein worktree-Live-Stand landet nicht zusätzlich im omarchy-backup.
+  Läuft Live als worktree, verweigern `install.sh` und `update.sh` im
+  Entwicklungs-Checkout den Lauf (sie würden Live still auf den
+  Entwicklungsstand biegen; bewusst: `POLARIS_INSTALL_HERE=1`). Die Sperre vor
+  einem Update deckt auch Gedächtnis-Spiegel und Radar ab und greift direkt
+  vor dem Wechsel.
 - **Rückmeldungen von bernhard2804 (2026-11-05):**
   - `polaris update`: Der Health Check am Ende meldete noch „Update
     verfügbar“; der Zustand wird jetzt vorher geschrieben (Test neu).
@@ -206,6 +300,23 @@ verlangen. Einzelheiten stehen in der README.
   (`--chat-sources` für unbeaufsichtigte Läufe). Ohne Chatquellen richtet er
   keinen Native Host und keine Bridge-Timer ein bzw. deaktiviert vorhandene
   Bridge-Timer beim erneuten Lauf.
+
+## 0.4.5 (2026-11-09)
+
+Teil-Release aus Zweig `release-0.4.5` (Spiegelstand 05.11. plus die
+folgenden Punkte); alles unter „Unveröffentlicht“ ist noch nicht im Spiegel.
+
+- **Erweiterung 0.4.5: „Letzter Export“ je Chat (2026-11-09):** Das Popup
+  zeigte unter „Last export“ die Zeit des Projekts, also auch Exporte aus
+  anderen Chats desselben Projekts; ein seit Tagen ruhender Chat wirkte so wie
+  „vor Minuten synchronisiert“. Jetzt zwei Zeilen: „dieser Chat“ und „Projekt“,
+  bei Exporten vor heute mit Datum. Bis zum ersten neuen Export nimmt die
+  Chat-Zeile den Zeitpunkt aus der „schon exportiert“-Liste (nur
+  Nachrichten-Exporte, bei ChatGPT-Abbildern „-“). Nacharbeit: keine,
+  Firefox aktualisiert die Erweiterung selbst.
+
+- **Privatsphäre-Prüfung:** fester Vorspann von `knowledge-archiv.md` gilt als
+  Polaris-Formatzeile (Fehltreffer in geschützten Projekten mit Archiv).
 
 ## 0.4.4 (2026-10-23)
 

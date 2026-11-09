@@ -25,7 +25,8 @@ downloads nothing. It creates:
 - the Firefox native messaging host and the Omarchy widget
 
 Replaced files are backed up to `~/.local/share/polaris/install-backups/<time>/`.
-Requirements: `python3` with PyYAML (`python-yaml`), `jq` for the widget,
+Requirements: `python3` with PyYAML (`python-yaml`), `bubblewrap` (sandbox for
+foreign content; without it nothing is curated), `jq` for the widget,
 `codex` or `claude` (logged in) for the curator, Firefox for the extension.
 The extension itself is installed by hand (see
 [Installing the extension](browser-capture.md#installing-the-extension-firefox)).
@@ -70,9 +71,12 @@ polaris update --check    # only look; exit 0 = update available
 `update.sh` runs `git fetch`, fast-forward only, then
 `install.sh --yes --only-existing` for what is already set up (units,
 widgets, dock, memory; nothing new is added), then `polaris-curator health`,
-and finally pulls the companion parts: the omarchy-backup checkout in
-`~/.local/share/polaris/extras/` (fast-forward) and the git-managed widgets
-(`omarchy plugin update`). Local commits or modified files abort the update
+and finally checks the companion parts: the omarchy-backup checkout in
+`~/.local/share/polaris/extras/` and the git-managed widgets. New commits are
+shown first and only pulled after you confirm in the terminal, or with
+`POLARIS_UPDATE_EXTRAS=1 polaris update` (with `--yes` they are only shown).
+An active Claude guard hook is never replaced by an update; after reviewing
+the shown diff, adopt it with `POLARIS_ADOPT_GUARD=1 ~/.local/share/polaris/app/install.sh --yes --only-existing`. Local commits or modified files abort the update
 (your own changes belong in a branch or pull request). If the health check
 turns red or `install.sh` fails, it goes back to the previous commit. At most
 once a day the health check shows "Update: available …". The version number
@@ -104,18 +108,21 @@ cp -a "$APP"/extras/. ~/.local/share/polaris-extras/
 printf 'include ~/.local/share/polaris-extras\n' > ~/.config/omarchy-backup/paths.d/polaris-extras.conf
 omarchy-backup doctor                            # must report HEALTHY
 # 2. switch the program folder to this repository, keep the old state
+systemctl --user list-units 'polaris-*' --state=active --no-legend  # must print nothing; else stop them first
+cp -a "$APP" "$APP.vor-git-$(date +%Y%m%d-%H%M%S)"  # full copy: the checkout below overwrites local changes
 cd "$APP"
 [ -d .git ] || git init -q
 git remote set-url origin https://github.com/mstio/polaris-connector.git 2>/dev/null \
   || git remote add origin https://github.com/mstio/polaris-connector.git
 git fetch origin
-git branch bundle-old 2>/dev/null || true        # keeps your own commits, if any
+git branch bundle-old 2>/dev/null || true        # keeps your own commits, if any (needs a commit; the copy above covers the rest)
 git checkout -B main origin/main --force         # replaces the files with this repository
 # 3. set up again and check
 ./install.sh --dry-run --yes --storage-unit none # or your own drive unit instead of none
 ./install.sh --yes --storage-unit none
 omarchy restart shell
 polaris update --check                           # "up to date"
+# once everything works for a few days: rm -r "$APP".vor-git-*
 ```
 
 The widgets keep running from their copies in `~/.config/omarchy/plugins/`,

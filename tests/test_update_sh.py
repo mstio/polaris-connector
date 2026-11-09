@@ -49,17 +49,114 @@ class TestUpdateState(unittest.TestCase):
         git(other, "push", "-q")
         self.work = work
 
-    def run_update(self, health_body: str):
+    def run_update(self, health_body: str, install: str = "true", active: str = ""):
         self.seen = self.tmp / "seen.txt"
         self.state = self.home / ".local/state/polaris/update-check.json"
         health = self.tmp / "health.sh"
         health.write_text(f"#!/bin/sh\ncat '{self.state}' >> '{self.seen}' 2>/dev/null; echo >> '{self.seen}'\n"
                           + health_body)
         health.chmod(0o755)
-        env = {**GITENV, "HOME": str(self.home), "POLARIS_UPDATE_INSTALL": "true",
-               "POLARIS_UPDATE_HEALTH": str(health)}
+        # systemctl-Ersatz: "is-active" ist wahr nur fuer die genannten Units.
+        sysctl = self.tmp / "systemctl.sh"
+        sysctl.write_text("#!/bin/sh\nfor a in \"$@\"; do case \" " + active + " \" in *\" $a \"*) exit 0 ;; esac; done\nexit 3\n")
+        sysctl.chmod(0o755)
+        env = {**GITENV, "HOME": str(self.home), "POLARIS_UPDATE_INSTALL": install,
+               "POLARIS_UPDATE_HEALTH": str(health), "POLARIS_UPDATE_SYSTEMCTL": str(sysctl)}
         return subprocess.run(["bash", str(self.work / "update.sh"), "--yes"], env=env,
                               capture_output=True, text=True)
+
+    @staticmethod
+    def health_json(*errors: str) -> str:
+        checks = [{"id": "base", "level": "ok"}] + [{"id": e, "level": "error"} for e in errors]
+        return json.dumps({"level": "error" if errors else "ok", "checks": checks})
+
+    def health_switch(self, before: tuple, after: tuple) -> str:
+        """Health-Skript: vor dem Update `before`-Fehler, danach `after`-Fehler."""
+        return (f"[ -e '{self.work}/neu.txt' ] && echo '{self.health_json(*after)}' "
+                f"|| echo '{self.health_json(*before)}'\n")
+
+    def test_new_error_on_already_broken_install_rolls_back(self):
+        # vorher schon rot (a), danach zusaetzlich b -> zurueck (frueher: kein Rueckweg)
+        r = self.run_update(self.health_switch(("a",), ("a", "b")))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        self.assertIn("b", r.stderr)
+
+    def test_same_errors_before_and_after_keep_update(self):
+        r = self.run_update(self.health_switch(("a",), ("a",)))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.work / "neu.txt").exists())
+
+    def test_unreadable_health_before_and_after_warns(self):
+        # Gremium Codex 2026-11-09: vorher wie nachher unlesbar ist kein neuer
+        # Fehler (Update bleibt), darf aber nicht still als geprueft gelten.
+        r = self.run_update("echo kaputt\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("nicht lesbar", r.stderr)
+
+    def test_readable_health_gives_no_unreadable_warning(self):
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("nicht lesbar", r.stderr)
+
+    def test_failing_install_rolls_back_and_logs(self):
+        r = self.run_update(self.health_switch((), ()), install="false")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        logs = list((self.home / ".local/state/polaris").glob("update-*.log"))
+        self.assertTrue(logs, "Rueckweg ohne Protokoll")
+
+    def test_update_works_in_a_git_worktree(self):
+        # Live-Stand als worktree (ADR 003): .git ist dort eine Datei.
+        live = self.tmp / "live"
+        git(self.work, "worktree", "add", "-q", "-b", "live", str(live), "main")
+        git(live, "branch", "-q", "--set-upstream-to", "origin/main")
+        shutil.copy(self.work / "update.sh", live / "update.sh")
+        self.work = live
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((live / "neu.txt").exists())
+
+    def test_dev_checkout_refuses_when_live_is_a_worktree(self):
+        app = self.home / ".local/share/polaris/app"
+        app.parent.mkdir(parents=True)
+        git(self.work, "worktree", "add", "-q", "-b", "live", str(app), "main")
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("worktree", r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+
+    def _extras_repo(self):
+        """omarchy-backup als Extra mit einem neuen Commit im Upstream."""
+        up = self.tmp / "ob-up.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(up)], check=True, env=GITENV)
+        seed = self.tmp / "ob-seed"
+        subprocess.run(["git", "clone", "-q", str(up), str(seed)], check=True, env=GITENV)
+        for k, v in (("user.name", "t"), ("user.email", "t@example.invalid")):
+            git(seed, "config", k, v)
+        (seed / "a").write_text("1"); git(seed, "add", "-A"); git(seed, "commit", "-q", "-m", "a")
+        git(seed, "push", "-q", "origin", "HEAD:main")
+        ob = self.home / ".local/share/polaris/extras/omarchy-backup"
+        ob.parent.mkdir(parents=True)
+        subprocess.run(["git", "clone", "-q", str(up), str(ob)], check=True, env=GITENV)
+        (seed / "b").write_text("2"); git(seed, "add", "-A"); git(seed, "commit", "-q", "-m", "fremd")
+        git(seed, "push", "-q", "origin", "HEAD:main")
+        return ob
+
+    def test_extras_are_shown_not_pulled_with_yes(self):
+        # Gutachten Codex 2026-11-07: Fremdcode der Extras nicht ungesehen ziehen.
+        ob = self._extras_repo()
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("fremd", r.stdout)                       # angezeigt
+        self.assertFalse((ob / "b").exists())                   # nicht gezogen
+        self.assertIn("POLARIS_UPDATE_EXTRAS=1", r.stdout)
+
+    def test_no_switch_while_a_polaris_service_runs(self):
+        r = self.run_update(self.health_switch((), ()), active="polaris-curator.service")
+        self.assertEqual(r.returncode, 75, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        self.assertIn("polaris-curator.service", r.stderr)
 
     def test_health_sees_state_after_update(self):
         r = self.run_update("echo '{\"level\": \"ok\"}'\n")

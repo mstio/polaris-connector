@@ -10,8 +10,11 @@ denen tatsaechlich etwas verloren gehen oder ausfallen kann.
 
 from __future__ import annotations
 
+import hashlib
+import time
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -19,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import health as archive_health
-from . import integrity
+from . import integrity, layout
 from .i18n import language, t
 
 HOME = Path.home()
@@ -180,7 +183,36 @@ def check_journals(projects: dict) -> dict:
     if stuck:
         return _c("journal", label, "error",
                   t("unterbrochen: {items} – `polaris-curator journal <Projekt>`", items=", ".join(stuck)))
+    leftovers = _stale_tmp_files(projects, now)
+    if leftovers:
+        return _c("journal", label, "warn",
+                  t("keiner offen; {n} verwaiste Zwischendatei(en), z. B. {item} – nach Prüfung löschen",
+                    n=len(leftovers), item=leftovers[0]))
     return _c("journal", label, "ok", t("keiner offen"))
+
+
+# Eindeutige Zwischendateien von storage.atomic_write_text (".<name>.<pid>.<hex>.tmp",
+# seit 2026-11-07): bleiben nur nach Absturz/Stromausfall liegen und wuerden nie
+# mehr ueberschrieben. Nur Verzeichniseintraege, keine Inhalte (ADR 004, Schritt 0).
+_TMP_RE = re.compile(r"^\..+\.\d+\.[0-9a-f]{8}\.tmp$")
+TMP_STALE_S = 24 * 3600
+
+
+def _stale_tmp_files(projects: dict, now: float) -> list[str]:
+    found = []
+    for path in sorted({p.resolve() for p in projects.values()}):
+        for d in (path, path / ".polaris"):
+            try:
+                with os.scandir(d) as it:
+                    for e in it:
+                        try:
+                            if _TMP_RE.match(e.name) and now - e.stat(follow_symlinks=False).st_mtime > TMP_STALE_S:
+                                found.append(f"{path.name}/{d.name + '/' if d != path else ''}{e.name}")
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    return found
 
 
 PENDING_STALE_DAYS = 7
@@ -272,7 +304,7 @@ def check_separation(mappings: dict | None = None) -> dict:
     try:
         findings = integrity.scan(mappings)
     except OSError as exc:
-        return _c("separation", label, "warn", t("Prüfung fehlgeschlagen: {exc}", exc=exc))
+        return {**_c("separation", label, "warn", t("Prüfung fehlgeschlagen: {exc}", exc=exc)), "transient": True}
     blocking = [f for f in findings if f.blocking]
     if blocking:
         projects = sorted({p for f in blocking for p in f.projects})
@@ -405,6 +437,8 @@ def check_widget(src: Path | None = None, active: Path | None = None) -> dict | 
 UPDATE_STATE = HOME / ".local" / "state" / "polaris" / "update-check.json"
 UPDATE_SCRIPT = Path(__file__).resolve().parents[2] / "update.sh"
 UPDATE_MAX_AGE_H = 24
+UPDATE_ATTEMPT = HOME / ".local" / "state" / "polaris" / "update-check.attempt"
+UPDATE_RETRY_S = 3600
 
 
 def check_update(now: datetime) -> dict | None:
@@ -421,16 +455,38 @@ def check_update(now: datetime) -> dict | None:
         pass
     age = _age_days(state.get("checked_at"), now)
     if age is None or age * 24 >= UPDATE_MAX_AGE_H:
+        # Seit 2026-11-07 (ADR 003) losgeloest im Hintergrund: der Health Check
+        # wartet nie auf das Netz (vorher bis 70 s im Widget-Aufruf). Der neue
+        # Zustand erscheint beim naechsten Aufruf. Ohne Netz schreibt update.sh
+        # keinen Zustand; der Versuchsmarker begrenzt dann auf einen je Stunde.
         try:
-            subprocess.run([str(UPDATE_SCRIPT), "--check"], capture_output=True, timeout=70, check=False)
-            state = json.loads(UPDATE_STATE.read_text(encoding="utf-8"))
-        except (OSError, ValueError, subprocess.SubprocessError):
-            return _c("update", "Update", "ok", t("Prüfung nicht möglich (offline?) – polaris update --check"))
+            last_try = UPDATE_ATTEMPT.stat().st_mtime
+        except OSError:
+            last_try = 0.0
+        if time.time() - last_try >= UPDATE_RETRY_S:
+            try:
+                UPDATE_ATTEMPT.parent.mkdir(parents=True, exist_ok=True)
+                UPDATE_ATTEMPT.touch()
+                subprocess.Popen([str(UPDATE_SCRIPT), "--check"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except OSError:
+                pass
+        if age is None:
+            return _c("update", "Update", "ok", t("Prüfung läuft bzw. nicht möglich (offline?) – polaris update --check"))
+    # Scheitert die Pruefung dauerhaft, bleibt der Zustand alt: sichtbar machen.
+    stale = t(", zuletzt geprüft {age}", age=_fmt_age(age)) if age is not None and age > 1 else ""
+    # Gelb schon nach 3 Tagen ohne erfolgreiche Pruefung (Gutachten agy 2026-11-07;
+    # vorher 14): eine dauerhaft scheiternde Pruefung soll bald auffallen.
+    if age is not None and age > 3 and int(state.get("behind") or 0) == 0:
+        return _c("update", "Update", "warn",
+                  t("zuletzt geprüft {age} – polaris update --check", age=_fmt_age(age)),
+                  command="polaris update --check")
     if int(state.get("behind") or 0) > 0:
         return _c("update", "Update", "warn",
                   t("verfügbar: {local} → {remote} – polaris update",
                     local=state.get("local", "?"), remote=state.get("remote", "?")), command="polaris update")
-    return _c("update", "Update", "ok", t("aktuell ({local})", local=state.get("local", "?")))
+    return _c("update", "Update", "ok", t("aktuell ({local})", local=state.get("local", "?")) + stale)
 
 
 def check_curator_timer() -> dict:
@@ -465,7 +521,21 @@ def check_llm() -> dict:
     notes = []
     if missing:
         notes.append(t("{missing} (Ersatz/Prüfer) fehlt", missing=", ".join(missing)))
+    # Abgelehnte Uebernahme einer erneuerten Anmeldung (llm._sync_back_codex_auth):
+    # ohne Hinweis verloere der Nutzer Stunden spaeter still die Anmeldung.
+    try:
+        cs = json.loads(llm.CRED_SYNC_STATE.read_text(encoding="utf-8"))
+        if cs.get("refused") and time.time() - float(cs.get("at", 0)) < 7 * 86400:
+            notes.append(t("erneuerte Anmeldung nicht übernommen ({file}: {fields}) – ggf. neu anmelden",
+                           file=Path(str(cs.get("file", "?"))).name,
+                           fields=", ".join(str(f) for f in cs["refused"][:4])))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     problem = sandbox.status()
+    if problem and os.environ.get("POLARIS_NO_SANDBOX") != "1":
+        # Seit 2026-11-07 fail-closed: ohne Sandbox laeuft keine Kuratierung.
+        return _c("llm", label, "error",
+                  t("Sandbox nicht nutzbar – Kuratierung ausgesetzt: {problem}", problem=problem))
     if problem:
         notes.append(t("ohne Sandbox: {problem}", problem=problem))
     if notes:
@@ -675,7 +745,138 @@ def check_mount() -> dict:
     return _c("mount", label, "ok", ", ".join(dict.fromkeys(kinds)))
 
 
+# --- Zwischenspeicher fuer teure Pruefungen (ADR 003, 2026-11-07) ----------
+# Das Widget ruft `health` alle 10 min auf. check_separation las dabei jedes
+# Mal alle Rohdaten-JSONs vom Cloud-Laufwerk, check_memory startete memlint.
+# Beide rechnen nur neu, wenn sich ihr Fingerabdruck aendert (nur
+# Verzeichniseintraege bzw. Datei-Metadaten, keine Inhalte), spaetestens
+# nach HEALTH_CACHE_MAX_AGE. POLARIS_HEALTH_NO_CACHE=1 schaltet ab (Tests).
+HEALTH_CACHE = HOME / ".local" / "state" / "polaris" / "health-cache.json"
+HEALTH_CACHE_MAX_AGE = 6 * 3600
+
+
+def _dir_entries(directory: Path) -> list:
+    out = []
+    try:
+        with os.scandir(directory) as it:
+            for e in it:
+                try:
+                    st = e.stat(follow_symlinks=False)
+                    out.append((e.name, st.st_size, st.st_mtime_ns))
+                except OSError:
+                    continue
+    except OSError:
+        return [("<fehlt>",)]
+    return sorted(out)
+
+
+def _lentry(p: Path) -> tuple:
+    """Metadaten ohne Symlinks zu folgen; Ziel eines Symlinks gehoert dazu."""
+    try:
+        st = p.lstat()
+        link = os.readlink(p) if p.is_symlink() else ""
+        return (str(p), st.st_mode, st.st_size, st.st_mtime_ns, link, p.exists())
+    except OSError:
+        return (str(p), "<fehlt>")
+
+
+def _separation_fingerprint() -> list:
+    mappings = integrity.load_mappings()
+    parts: list = [datetime.now().date().isoformat(), language(), _dir_entries(integrity.CONFLICTS_DIR)]
+    try:
+        parts.append(sorted((k, str(v)) for k, v in mappings.items()))
+    except AttributeError:
+        parts.append(repr(mappings))
+    for folder in integrity._project_folders(mappings, []):
+        for _src, d in layout.chat_messages_dirs(folder):
+            parts.append((str(d), _dir_entries(d), _dir_entries(d.parent / "conversations")))
+    return parts
+
+
+def _memory_fingerprint() -> list:
+    """Alle Eingaben von memlint: der Baum (auch Symlinks, kaputte Links,
+    Ordner) und die Systempruefungen ausserhalb - Agenten-Einstiege, Skill-
+    Ordner, Eintraege aus entrypoints.conf, omarchy-backup-Pfadregeln."""
+    parts: list = [language(), _lentry(MEMLINT)]
+    try:
+        tree = sorted(MEM_ROOT.rglob("*"))
+    except OSError:
+        tree = []
+    parts += [_lentry(p) for p in tree if ".git" not in p.parts]
+    outside = [HOME / ".claude" / "CLAUDE.md", HOME / ".codex" / "AGENTS.md", HOME / ".gemini" / "GEMINI.md",
+               HOME / ".agents" / "skills", HOME / ".claude" / "skills", HOME / ".codex" / "skills",
+               HOME / ".config" / "omarchy-backup" / "paths.conf"]
+    try:
+        for line in (MEM_ROOT / "entrypoints.conf").read_text(encoding="utf-8").splitlines():
+            field = line.split("#", 1)[0].split()
+            if field:
+                outside.append(Path(os.path.expanduser(field[0])))
+    except OSError:
+        pass
+    parts += [_lentry(p) for p in outside]
+    parts.append(_dir_entries(HOME / ".config" / "omarchy-backup" / "paths.d"))
+    for d in (HOME / ".agents" / "skills", HOME / ".claude" / "skills", HOME / ".codex" / "skills"):
+        parts.append(_dir_entries(d))
+    return parts
+
+
+def _cached(name: str, fingerprint, compute, max_age: float | None = None) -> dict:
+    if os.environ.get("POLARIS_HEALTH_NO_CACHE") == "1":
+        return compute()
+    try:
+        fp = hashlib.sha256(json.dumps(fingerprint(), default=str).encode()).hexdigest()
+    except Exception:  # noqa: BLE001 - ohne Fingerabdruck einfach rechnen
+        return compute()
+    try:
+        cache = json.loads(HEALTH_CACHE.read_text(encoding="utf-8"))
+        cache = cache if isinstance(cache, dict) else {}
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(name)
+    now = time.time()
+    try:  # Zwischenspeicher ist Eingabe wie jede andere: pruefen, nicht vertrauen
+        fresh = (isinstance(hit, dict) and hit.get("fp") == fp
+                 and 0 <= now - float(hit.get("at", 0)) < (HEALTH_CACHE_MAX_AGE if max_age is None else max_age))
+    except (TypeError, ValueError):
+        fresh = False
+    check = hit.get("check") if fresh else None
+    if isinstance(check, dict) and check.get("id") == name and check.get("level") in ("ok", "warn", "error"):
+        return check
+    result = compute()
+    if result.get("transient"):  # voruebergehender Fehler: beim naechsten Mal neu
+        return {k: v for k, v in result.items() if k != "transient"}
+    cache[name] = {"fp": fp, "at": now, "check": result}
+    try:
+        HEALTH_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = HEALTH_CACHE.with_name(HEALTH_CACHE.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, HEALTH_CACHE)
+    except OSError:
+        pass  # Zwischenspeicher ist entbehrlich
+    return result
+
+
 def check_memory() -> dict:
+    """Maschinengedaechtnis: memlint-Ergebnis (zwischengespeichert, solange
+    sich keine seiner Eingaben aendert) plus Zustand des Spiegels (immer frisch)."""
+    return _with_mirror(_cached("memory", _memory_fingerprint, _memlint_check))
+
+
+def _with_mirror(c: dict) -> dict:
+    """Spiegelzustand nie aus dem Zwischenspeicher: "Spiegel neuer als lokal"
+    (moegliche Manipulation) und das Alter muessen sofort sichtbar sein."""
+    if not c.get("mirror"):
+        return c
+    level, mirror = mirror_status()
+    out = {k: v for k, v in c.items() if k != "mirror"}
+    # immer die schlechtere Stufe (Gutachten Codex 2026-11-07: ein Spiegel darf
+    # einen memlint-Befund nie ueberdecken, auch nach kuenftigen Umbauten)
+    out["level"] = max((c.get("level", "ok"), level), key=lambda lv: _LEVELS.get(lv, 0))
+    out["detail"] = c["detail"] + (f", {mirror}" if mirror else "")
+    return out
+
+
+def _memlint_check() -> dict:
     """Maschinengedaechtnis ~/.config/ai-agents per memlint (deterministisch, stdlib)."""
     label = t("Maschinengedächtnis")
     if not MEM_ROOT.is_dir():
@@ -688,7 +889,8 @@ def check_memory() -> dict:
                               env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         report = json.loads(proc.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
-        return _c("memory", label, "warn", t("memlint konnte nicht ausgeführt werden"))
+        # transient: nicht zwischenspeichern (z. B. Zeitlimit unter Last)
+        return {**_c("memory", label, "warn", t("memlint konnte nicht ausgeführt werden")), "transient": True}
     findings = report.get("findings") or []
     errors = [f for f in findings if f.get("level") == "error"]
     warnings = [f for f in findings if f.get("level") != "error"]
@@ -701,8 +903,7 @@ def check_memory() -> dict:
     # Groessenhinweise halten die Handoffs schlank, sind aber kein Ausfall.
     note = t(", {n} Hinweis(e)", n=len(warnings)) if warnings else ""
     detail = t("konsistent, {n} Einträge", n=report.get("stats", {}).get("tags", 0)) + note
-    level, mirror = mirror_status()
-    return _c("memory", label, level, detail + (f", {mirror}" if mirror else ""))
+    return {**_c("memory", label, "ok", detail), "mirror": True}
 
 
 def check_security(now: datetime) -> dict:
@@ -1016,6 +1217,17 @@ def check_config(problems: tuple[str, ...]) -> dict | None:
     return _c("chat-sources", t("Chatquellen-Konfiguration"), "error", " ".join(problems))
 
 
+def _count_alarm_days(checks: list[dict]) -> None:
+    """Alarmmuedigkeit messen (2026-11-08, Perspektivwechsel/Kopfstand): je
+    Pruefung die Tage mit warn/error, dazu die Tage mit Health-Lauf als Nenner.
+    Bleibt eine Zeile wochenlang gelb, ohne dass jemand handelt, ist sie
+    Rauschen oder ein ignoriertes Problem (Auswertung ~05.12., ADR 004).
+    Nur Pruef-IDs, nie Texte; hoechstens ein Schreibvorgang je Tag und Name."""
+    from . import usage
+    usage.days(["health:day"] + [f"health-{c['level']}:{c['id']}" for c in checks
+                                 if c.get("level") in ("warn", "error") and c.get("id")])
+
+
 def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_claude: int = 7,
             chat_sources: tuple[str, ...] = ("chatgpt", "claude"), sources_explicit: bool = False,
             config_problems: tuple[str, ...] = ()) -> dict:
@@ -1027,7 +1239,7 @@ def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_clau
         check_bridge_without_chatgpt(projects) if chat_sources and "chatgpt" not in chat_sources else None,
         check_claude_archive(projects, max_days_without_claude, now, claude_required)
         if "claude" in chat_sources else None,
-        check_separation(),
+        _cached("separation", _separation_fingerprint, check_separation),
         check_journals(projects),
         check_curation(projects, now),
         check_extension(chat_sources, claude_required) if chat_sources else None,
@@ -1046,6 +1258,7 @@ def collect(projects: dict, max_days_without_chatgpt: int, max_days_without_clau
     checks = [c for c in checks if c is not None]
     system = check_system(now)
     worst = max((_LEVELS[c["level"]] for c in checks + system), default=0)
+    _count_alarm_days(checks + system)
     return {
         "generated_at": now.isoformat(),
         # Fuer das Widget, das seine festen Texte selbst uebersetzt.

@@ -2,10 +2,12 @@
 Description=Polaris: Omarchy-Radar und Sicherheitsabgleich (handoff/omarchy-radar.md)
 # Nur Netzabrufe (GitHub, Arch Security Tracker, kernel.org, CISA KEV), ~3 MB.
 # Ohne Netz Exit 75, die alte Datei bleibt; der naechste Lauf holt nach.
+# Bewusst ohne ExecCondition=polaris-awake (bis 08.11.2026): der Radar
+# liest kein Cloud-Laufwerk, und der naechtliche Tageslauf wurde bei
+# gesperrtem Bildschirm jedes Mal uebersprungen (tests/test_units.py).
 
 [Service]
 Type=oneshot
-ExecCondition=%h/.local/bin/polaris-awake
 ExecStart=%h/.local/bin/polaris-radar --notify --quiet
 SuccessExitStatus=75
 Nice=10

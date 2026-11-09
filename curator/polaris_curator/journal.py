@@ -32,7 +32,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import layout, storage
+from . import layout, storage, usage
 
 NAME = "journal.json"
 
@@ -131,6 +131,7 @@ def ensure_none_pending(project: Path) -> None:
 def replay_files(project: Path, record: dict[str, Any]) -> None:
     """Dateien auf den Zielstand bringen; JournalConflict, wenn eine Datei
     weder Ausgangs- noch Zieltext hat."""
+    usage.mark("journal:replay")  # Nutzungszaehler (ADR 003)
     todo = []
     for name, spec in (record.get("files") or {}).items():
         current = _read(project / name)

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from . import config, mapping, snapshot, storage
+from . import config, mapping, snapshot, storage, usage
 from .logging_setup import setup_logging
 from .schema import ValidationError, validate_and_normalize
 
@@ -331,6 +331,8 @@ def _evict_stale_existing(event: dict, detail: tuple, known_paths: list[Path]) -
     if folder is None:
         return False
     source = event.get("source", "chatgpt")
+    if isinstance(source, str) and source.isascii() and len(source) <= 40:
+        usage.mark(f"bridge:archive:{source}")  # Nutzungszaehler (ADR 003)
     mdir = storage.messages_dir(folder, source)
     ids = {storage.sanitize_id(i) for i in {event["message"]["id"], *storage.member_ids(event)}}
     # Erst alles lesen und pruefen, dann verschieben (kein halber Zustand).

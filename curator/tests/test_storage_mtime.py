@@ -20,5 +20,27 @@ class TestAtomicWriteSetsMtime(unittest.TestCase):
         self.assertGreater(p.stat().st_mtime, time.time() - 60)
 
 
+class TestAtomicWriteTmpNames(unittest.TestCase):
+    """Eindeutige Zwischendateien (ADR 003): keine Reste, kein fester .tmp-Name."""
+
+    def test_no_leftovers_and_no_fixed_tmp(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from polaris_curator import storage
+        d = Path(tempfile.mkdtemp())
+        target = d / "knowledge.md"
+        (d / "knowledge.md.tmp").write_text("fremd")      # alter fester Name bleibt unberuehrt
+        storage.atomic_write_text(target, "neu")
+        self.assertEqual(target.read_text(), "neu")
+        self.assertEqual((d / "knowledge.md.tmp").read_text(), "fremd")
+        self.assertEqual(sorted(p.name for p in d.iterdir()), ["knowledge.md", "knowledge.md.tmp"])
+        with patch.object(storage.os, "replace", side_effect=OSError("Laufwerk weg")):
+            with self.assertRaises(OSError):
+                storage.atomic_write_text(target, "zwei")
+        self.assertEqual(sorted(p.name for p in d.iterdir()), ["knowledge.md", "knowledge.md.tmp"])
+
+
 if __name__ == "__main__":
     unittest.main()

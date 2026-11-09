@@ -97,6 +97,40 @@ class InstallShTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertTrue((self.plugins / "mst.agent-launchers").is_dir())
 
+    def test_long_update_news_do_not_abort_install(self):
+        # >40 Zeilen Neuigkeiten: head -40 + pipefail beendete install.sh vorzeitig.
+        state = self.home / ".local/state/polaris"
+        state.mkdir(parents=True)
+        (state / "neu-seit-update.md").write_text(
+            "# Neu\n\n## Update vom 2026-01-01 00:00\n\n" + "".join(f"- Punkt {i} " + "x" * 100 + "\n" for i in range(3000)))  # > 64-KB-Puffer
+        (state / "changelog-gesehen.md").write_text((REPO / "CHANGELOG.md").read_text())
+        r = self.install(*BASE_ARGS)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Punkt 37", r.stdout)
+        self.assertNotIn("Punkt 41", r.stdout)
+
+    def test_private_dirs_are_0700(self):
+        # Marktplatz #13877 (HANCORE-linux): auch bestehende 0755-Ordner werden enger.
+        dirs = (".config/polaris", ".local/share/polaris", ".local/state/polaris", "Downloads/polaris-inbox")
+        for d in dirs:
+            (self.home / d).mkdir(parents=True)
+            (self.home / d).chmod(0o755)
+        r = self.install(*BASE_ARGS)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for d in dirs:
+            self.assertEqual((self.home / d).stat().st_mode & 0o777, 0o700, d)
+
+    def test_private_dir_symlink_is_left_alone_with_warning(self):
+        target = self.base / "geteilt"
+        target.mkdir()
+        target.chmod(0o755)
+        (self.home / ".local/state").mkdir(parents=True)
+        (self.home / ".local/state/polaris").symlink_to(target)
+        r = self.install(*BASE_ARGS)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+        self.assertIn("ist ein Symlink", r.stdout)
+
     def test_only_existing_adds_nothing_new(self):
         self.install(*BASE_ARGS)
         subprocess.run(["rm", "-rf", str(self.plugins / "omadock")], check=True)

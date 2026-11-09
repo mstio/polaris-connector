@@ -31,11 +31,32 @@ _BUILTIN_DATE_FORMATS = set(range(14, 23)) | {45, 46, 47}
 MAX_ROWS_PER_SHEET = 500
 
 
+# Grenzen gegen Zip-Bomben (ADR 003/004, 2026-11-07): Office-Dateien kommen als
+# Mail-Anhang von aussen und werden hier ohne Sandbox entpackt. zipfile liest
+# hoechstens die im Kopf angegebene Groesse; deshalb genuegt es, diese zu deckeln.
+MAX_MEMBERS = 10_000
+MAX_TOTAL_UNCOMPRESSED = 256 * 2**20
+MAX_XML_MEMBER = 32 * 2**20  # ElementTree braucht ein Vielfaches im Speicher
+
+
+def _open_zip(data: bytes) -> zipfile.ZipFile:
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    infos = zf.infolist()
+    total = sum(i.file_size for i in infos)
+    if len(infos) > MAX_MEMBERS or total > MAX_TOTAL_UNCOMPRESSED:
+        zf.close()
+        raise ValueError(f"Archiv zu gross entpackt ({len(infos)} Teile, {total} Bytes) - nicht ausgewertet")
+    return zf
+
+
 def _read_xml(zf: zipfile.ZipFile, name: str) -> ET.Element | None:
     try:
-        return ET.fromstring(zf.read(name))
+        info = zf.getinfo(name)
     except KeyError:
         return None
+    if info.file_size > MAX_XML_MEMBER:
+        raise ValueError(f"{name} zu gross ({info.file_size} Bytes) - nicht ausgewertet")
+    return ET.fromstring(zf.read(info))
 
 
 # --- docx -------------------------------------------------------------------
@@ -54,7 +75,7 @@ def _docx_paragraph_text(p: ET.Element) -> str:
 
 
 def extract_docx(data: bytes) -> str:
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+    with _open_zip(data) as zf:
         root = _read_xml(zf, "word/document.xml")
     if root is None:
         raise ValueError("word/document.xml fehlt")
@@ -170,7 +191,7 @@ def _clean_number(value: str) -> str:
 
 
 def extract_xlsx(data: bytes) -> str:
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+    with _open_zip(data) as zf:
         shared = _shared_strings(zf)
         date_styles = _date_style_indices(zf)
         blocks: list[str] = []
@@ -206,7 +227,7 @@ def extract_xlsx(data: bytes) -> str:
 
 
 def extract_pptx(data: bytes) -> str:
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+    with _open_zip(data) as zf:
         slide_names = sorted(
             (n for n in zf.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)),
             key=lambda n: int(re.search(r"(\d+)\.xml$", n).group(1)),

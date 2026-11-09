@@ -596,10 +596,12 @@ class TestLlmCheck(unittest.TestCase):
                 patch.object(sandbox, "status", return_value=sandbox_problem):
             return sh.check_llm()
 
-    def test_sandbox_problem_warns(self):
-        c = self._check(lambda b: "/x/claude" if b == "claude" else None, runtime="claude", model="opus",
-                        fallback_model=None, sandbox_problem="bubblewrap (bwrap) fehlt")
-        self.assertEqual(c["level"], "warn")
+    def test_sandbox_problem_is_error_since_fail_closed(self):
+        # ADR 003: ohne Sandbox ist die Kuratierung ausgesetzt -> rot.
+        with patch.dict(os.environ, {"POLARIS_NO_SANDBOX": ""}):
+            c = self._check(lambda b: "/x/claude" if b == "claude" else None, runtime="claude", model="opus",
+                            fallback_model=None, sandbox_problem="bubblewrap (bwrap) fehlt")
+        self.assertEqual(c["level"], "error")
         self.assertIn("bwrap", c["detail"])
 
     def test_main_cli_missing_is_error(self):
@@ -756,6 +758,136 @@ class TestMemoryMirror(unittest.TestCase):
 
 
 
+class TestHealthCache(unittest.TestCase):
+    """Zwischenspeicher fuer teure Pruefungen (ADR 003, 2026-11-07)."""
+
+    def setUp(self):
+        self.file = Path(tempfile.mkdtemp()) / "health-cache.json"
+        self.fp = ["a"]
+        self.calls = 0
+
+    def compute(self):
+        self.calls += 1
+        return {"id": "x", "level": "ok", "detail": f"lauf {self.calls}"}
+
+    def run_cached(self):
+        with patch.object(sh, "HEALTH_CACHE", self.file), \
+                patch.dict(os.environ, {"POLARIS_HEALTH_NO_CACHE": ""}):
+            return sh._cached("x", lambda: list(self.fp), self.compute)
+
+    def test_same_fingerprint_is_not_recomputed(self):
+        self.assertEqual(self.run_cached()["detail"], "lauf 1")
+        self.assertEqual(self.run_cached()["detail"], "lauf 1")
+        self.assertEqual(self.calls, 1)
+
+    def test_changed_fingerprint_recomputes(self):
+        self.run_cached()
+        self.fp = ["b"]
+        self.assertEqual(self.run_cached()["detail"], "lauf 2")
+
+    def test_max_age_recomputes(self):
+        self.run_cached()
+        with patch.object(sh, "HEALTH_CACHE_MAX_AGE", -1):
+            self.run_cached()
+        self.assertEqual(self.calls, 2)
+
+    def test_disabled_by_env_and_broken_fingerprint(self):
+        with patch.object(sh, "HEALTH_CACHE", self.file), \
+                patch.dict(os.environ, {"POLARIS_HEALTH_NO_CACHE": "1"}):
+            sh._cached("x", lambda: self.fp, self.compute)
+            sh._cached("x", lambda: self.fp, self.compute)
+        self.assertEqual(self.calls, 2)
+        with patch.object(sh, "HEALTH_CACHE", self.file), patch.dict(os.environ, {"POLARIS_HEALTH_NO_CACHE": ""}):
+            sh._cached("x", lambda: 1 / 0, self.compute)      # kein Fingerabdruck: einfach rechnen
+        self.assertEqual(self.calls, 3)
+
+    def test_separation_fingerprint_reads_listings_not_contents(self):
+        base = Path(tempfile.mkdtemp())
+        proj = base / "P"
+        msgs = proj / "raw" / "chatgpt" / "messages"
+        msgs.mkdir(parents=True)
+        (msgs / "1.json").write_text("{}")
+        with patch.object(sh.integrity, "load_mappings", return_value={"pid": proj}), \
+                patch.object(sh.integrity, "CONFLICTS_DIR", base / "none"), \
+                patch.object(Path, "read_text", side_effect=AssertionError("Inhalt gelesen")):
+            a = sh._separation_fingerprint()
+        (msgs / "2.json").write_text("{}")
+        with patch.object(sh.integrity, "load_mappings", return_value={"pid": proj}), \
+                patch.object(sh.integrity, "CONFLICTS_DIR", base / "none"):
+            b = sh._separation_fingerprint()
+        self.assertNotEqual(a, b)
+
+    def test_mirror_state_is_never_cached(self):
+        # "Spiegel neuer als lokal" muss sofort sichtbar sein (Zweitpruefung 2026-11-07).
+        lint = unittest.mock.Mock(return_value={"id": "memory", "label": "M", "level": "ok",
+                                                "detail": "konsistent", "mirror": True})
+        states = iter([("ok", "gespiegelt"), ("warn", "Spiegel neuer als lokal")])
+        with patch.object(sh, "HEALTH_CACHE", self.file), patch.dict(os.environ, {"POLARIS_HEALTH_NO_CACHE": ""}), \
+                patch.object(sh, "_memlint_check", lint), patch.object(sh, "_memory_fingerprint", lambda: ["x"]), \
+                patch.object(sh, "mirror_status", side_effect=lambda: next(states)):
+            first, second = sh.check_memory(), sh.check_memory()
+        self.assertEqual(lint.call_count, 1)
+        self.assertEqual(first["level"], "ok")
+        self.assertEqual(second["level"], "warn")
+        self.assertIn("Spiegel neuer als lokal", second["detail"])
+        self.assertNotIn("mirror", second)
+
+    def test_refused_credential_sync_is_shown(self):
+        import time as _t
+        from polaris_curator import llm
+        f = Path(tempfile.mkdtemp()) / "credential-sync.json"
+        f.write_text(json.dumps({"at": _t.time(), "file": "/x/.credentials.json", "refused": ["claudeAiOauth.scopes"]}))
+        with patch.object(llm, "CRED_SYNC_STATE", f), patch.object(sh, "sandbox_status_for_test", None, create=True), \
+                patch("polaris_curator.sandbox.status", return_value=None), \
+                patch("polaris_curator.llm.runtime_binaries", return_value={"codex": "/x"}), \
+                patch("polaris_curator.llm.main_binary", return_value="codex"):
+            c = sh.check_llm()
+        self.assertEqual(c["level"], "warn")
+        self.assertIn("nicht übernommen", c["detail"])
+        self.assertIn("claudeAiOauth.scopes", c["detail"])
+
+    def test_mirror_never_hides_a_memlint_finding(self):
+        c = {"id": "memory", "label": "M", "level": "warn", "detail": "Hinweis", "mirror": True}
+        with patch.object(sh, "mirror_status", return_value=("ok", "gespiegelt")):
+            self.assertEqual(sh._with_mirror(c)["level"], "warn")
+
+    def test_transient_failure_is_not_cached(self):
+        def failing():
+            self.calls += 1
+            return {"id": "x", "level": "warn", "detail": "Pruefung fehlgeschlagen", "transient": True}
+        with patch.object(sh, "HEALTH_CACHE", self.file), patch.dict(os.environ, {"POLARIS_HEALTH_NO_CACHE": ""}):
+            r = sh._cached("x", lambda: ["a"], failing)
+            sh._cached("x", lambda: ["a"], failing)
+        self.assertEqual(self.calls, 2)
+        self.assertNotIn("transient", r)
+
+    def test_broken_cache_entries_are_ignored(self):
+        fp = sh.hashlib.sha256(json.dumps(["a"]).encode()).hexdigest()
+        for bad in ({"fp": fp, "at": "kaputt", "check": {}}, {"fp": fp, "at": 0},
+                    {"fp": fp, "at": sh.time.time() + 10**6, "check": {"id": "x", "level": "ok"}},
+                    {"fp": fp, "at": sh.time.time(), "check": {"id": "fremd", "level": "ok"}}):
+            self.file.write_text(json.dumps({"x": bad}))
+            self.run_cached()
+        self.assertEqual(self.calls, 4)
+
+    def test_memory_fingerprint_sees_entrypoints_outside_the_tree(self):
+        home = Path(tempfile.mkdtemp())
+        mem = home / ".config" / "ai-agents"
+        mem.mkdir(parents=True)
+        (mem / "AGENTS.md").write_text("x")
+        (home / ".claude").mkdir()
+        link = home / ".claude" / "CLAUDE.md"
+        link.symlink_to(mem / "AGENTS.md")
+        with patch.object(sh, "HOME", home), patch.object(sh, "MEM_ROOT", mem):
+            a = sh._memory_fingerprint()
+            link.unlink()
+            b = sh._memory_fingerprint()
+            (mem / "broken").symlink_to(mem / "gibt-es-nicht")
+            c = sh._memory_fingerprint()
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(b, c)
+
+
 class TestUpdateCheck(unittest.TestCase):
     """Update-Zeile (seit 2026-10-23): liest den Zustand von update.sh --check,
     holt ihn hoechstens einmal am Tag neu, ohne git-Checkout keine Zeile."""
@@ -769,8 +901,10 @@ class TestUpdateCheck(unittest.TestCase):
         self.now = datetime(2026, 10, 23, 12, 0, tzinfo=timezone.utc)
 
     def _check(self, run=None):
+        # Seit ADR 003 losgeloest per Popen; der Versuchsmarker liegt im Testordner.
         with patch.object(sh, "UPDATE_SCRIPT", self.script), patch.object(sh, "UPDATE_STATE", self.state), \
-                patch.object(sh.subprocess, "run", run or unittest.mock.Mock()) as mocked:
+                patch.object(sh, "UPDATE_ATTEMPT", self.tmp / "attempt"), \
+                patch.object(sh.subprocess, "Popen", run or unittest.mock.Mock()) as mocked:
             return sh.check_update(self.now), mocked
 
     def _write(self, hours_ago, behind, local="0.4.4", remote="0.4.5"):
@@ -795,15 +929,25 @@ class TestUpdateCheck(unittest.TestCase):
         self.assertEqual(result["level"], "warn")
         self.assertIn("0.4.4 → 0.4.5", result["detail"])
 
-    def test_stale_state_triggers_check(self):
-        self._write(30, 0, "0.4.4", "0.4.4")
+    def test_stale_state_starts_background_check_without_waiting(self):
+        self._write(30, 1, "0.4.4", "0.4.5")
+        result, mocked = self._check()
+        mocked.assert_called_once()
+        self.assertTrue(mocked.call_args.kwargs.get("start_new_session"))
+        self.assertEqual(result["level"], "warn")          # bisheriger Zustand, kein Warten
+        self.assertIn("0.4.5", result["detail"])
+        _, again = self._check()                            # innerhalb einer Stunde: kein zweiter Versuch
+        again.assert_not_called()
 
-        def fake_run(*args, **kwargs):
-            self._write(0, 2, "0.4.4", "0.4.6")
-
-        result, _ = self._check(run=fake_run)
+    def test_long_unchecked_state_becomes_visible(self):
+        self._write(2 * 24, 0, "0.4.4", "0.4.4")
+        with patch.object(sh.time, "time", return_value=10**12):   # Versuchsmarker zaehlt nicht
+            result, _ = self._check()
+        self.assertEqual(result["level"], "ok")
+        self.assertIn("zuletzt geprüft", result["detail"])
+        self._write(4 * 24, 0, "0.4.4", "0.4.4")                   # seit Gutachten agy: ab 3 Tagen gelb
+        result, _ = self._check()
         self.assertEqual(result["level"], "warn")
-        self.assertIn("0.4.6", result["detail"])
 
     def test_offline_is_ok(self):
         result, _ = self._check(run=unittest.mock.Mock(side_effect=OSError("offline")))

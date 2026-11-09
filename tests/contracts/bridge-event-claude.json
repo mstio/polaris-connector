@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "source": "claude",
+  "project": {"id": "claude-p-0001", "name": "Musterfirma"},
+  "conversation": {"id": "c0000000-0000-4000-8000-000000000001", "title": "Planung", "url": "https://claude.ai/chat/c0000000-0000-4000-8000-000000000001"},
+  "message": {
+    "id": "m0000000-0000-4000-8000-000000000001",
+    "id_source": "native",
+    "parent_id": null,
+    "parent_id_source": null,
+    "role": "assistant",
+    "source_timestamp": "2026-11-07T09:01:00.000Z",
+    "content": "Der Termin ist auf Montag verschoben."
+  },
+  "captured_at": "2026-11-07T09:01:05.000Z"
+}

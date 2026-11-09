@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "source": "chatgpt",
+  "project": {"id": "g-p-0001", "name": "Musterfirma"},
+  "conversation": {"id": "conv-0001", "title": "Angebot", "url": "https://chatgpt.com/c/conv-0001"},
+  "message": {
+    "id": "msg-0001",
+    "id_source": "native",
+    "parent_id": null,
+    "parent_id_source": null,
+    "role": "user",
+    "source_timestamp": "2026-11-07T09:00:00.000Z",
+    "content": "Bitte das Angebot bis Freitag prüfen."
+  },
+  "captured_at": "2026-11-07T09:00:05.000Z"
+}

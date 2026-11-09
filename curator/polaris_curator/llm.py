@@ -9,6 +9,7 @@ API-Zugriff) ergaenzt werden kann, ohne den Rest des Curators anzufassen.
 from __future__ import annotations
 
 import json
+import time
 import logging
 import os
 import re
@@ -17,7 +18,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import sandbox
+from . import sandbox, usage
 from .change_schema import JSON_SCHEMA
 from .config import CuratorConfig
 
@@ -31,6 +32,10 @@ class LlmUnavailableError(Exception):
     """Die Runtime/das Modell selbst ist nicht erreichbar (Exec-Fehler,
     Timeout, Auth-Problem). Rechtfertigt einen Fallback-Versuch bzw. einen
     sauberen Abbruch des gesamten Laufs, siehe pipeline.py."""
+
+
+class LlmSandboxError(LlmUnavailableError):
+    """Sandbox nicht nutzbar: kein Ersatzmodell versuchen, Lauf abbrechen."""
 
 
 class LlmOutputError(Exception):
@@ -72,15 +77,89 @@ def _parse_tokens_used(stderr: str) -> int | None:
     return values[-1]
 
 
+def _sandbox_on() -> bool:
+    """Sandbox an (True) bzw. ausdruecklich aus (False, POLARIS_NO_SANDBOX=1).
+    Ist sie nicht nutzbar, ist die Runtime nicht verfuegbar: der Lauf bricht
+    sauber ab und wird spaeter wiederholt, statt Fremdinhalt ungeschuetzt an
+    das Modell zu geben (fail-closed, ADR 003)."""
+    try:
+        return sandbox.enabled()
+    except sandbox.SandboxUnavailable as exc:
+        raise LlmSandboxError(str(exc)) from exc
+
+
+# Positivliste (Gutachten Codex/agy, Zweitpruefung 2026-11-07): Eine erneuerte
+# Anmeldung darf nur Tokens und Zeitstempel aendern (codex: tokens.*_token,
+# last_refresh; claude: claudeAiOauth.accessToken/refreshToken/expiresAt).
+# Alles andere - Konto, Modus, API-Schluessel, Rechte, Listen - muss gleich
+# bleiben; Ablaufzeiten nur steigend.
+_CHANGEABLE_KEYS = {"id_token", "access_token", "refresh_token", "last_refresh",
+                    "accessToken", "refreshToken", "expiresAt", "refreshTokenExpiresAt"}
+_RISING_KEYS = {"expiresAt", "refreshTokenExpiresAt"}
+# Abgelehnte Rueckschreibung sichtbar machen (Health), nur Schluesselnamen.
+CRED_SYNC_STATE = Path.home() / ".local" / "state" / "polaris" / "credential-sync.json"
+
+
+def _diff_paths(old, new, prefix: str = "") -> list[str]:
+    """Namen der abweichenden Schluessel (nie Werte), fuer die Meldung."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        out = [f"{prefix}{k}" for k in sorted(set(old) ^ set(new))]
+        for k in sorted(set(old) & set(new)):
+            out += _diff_paths(old[k], new[k], f"{prefix}{k}.")
+        return out
+    return [prefix.rstrip(".")] if old != new else []
+
+
+def _record_cred_sync(real: Path, refused: list[str] | None) -> None:
+    try:
+        CRED_SYNC_STATE.parent.mkdir(parents=True, exist_ok=True)
+        data = {"at": time.time(), "file": str(real), "refused": refused}
+        tmp = CRED_SYNC_STATE.with_name(CRED_SYNC_STATE.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, CRED_SYNC_STATE)
+    except OSError:
+        pass
+
+
+def _same_shape(old, new) -> bool:
+    """Gleiche Schluessel und Typen ueberall; Werte nur in _CHANGEABLE_KEYS
+    veraenderbar (Zeichenketten bzw. steigende Zahlen), sonst gleich."""
+    if isinstance(old, dict):
+        if not isinstance(new, dict) or set(old) != set(new):
+            return False
+        for k in old:
+            o, n = old[k], new[k]
+            if k in _CHANGEABLE_KEYS and not isinstance(o, (dict, list)):
+                if type(o) is not type(n):
+                    return False
+                if k in _RISING_KEYS and isinstance(o, (int, float)) and n < o:
+                    return False
+                continue
+            if not _same_shape(o, n):
+                return False
+        return True
+    return type(old) is type(new) and old == new
+
+
 def _sync_back_codex_auth(private: Path, real: Path, before: bytes) -> None:
     """Hat die Modell-CLI ihre Anmeldung in der Sandbox erneuert, sie atomar
-    an den echten Ort zurueckschreiben - nur gueltiges JSON und nur, wenn sich
-    die echte Datei inzwischen nicht selbst geaendert hat."""
+    an den echten Ort zurueckschreiben - nur, wenn sich die echte Datei
+    inzwischen nicht selbst geaendert hat und die neue Fassung dieselbe Form
+    hat wie die alte (seit 2026-11-07, ADR 003): ein JSON-Objekt mit denselben
+    Schluesseln und Werttypen auf oberster Ebene, hoechstens 64 KB. Die Datei
+    ist ein Schreibweg von der Sandbox ins echte Home; sie darf dort nur eine
+    erneuerte Anmeldung ablegen, nichts anderes."""
     try:
         after = private.read_bytes()
         if after == before or real.read_bytes() != before:
             return
-        json.loads(after)
+        new, old = json.loads(after), json.loads(before)
+        if not isinstance(old, dict) or not _same_shape(old, new) or len(after) > 64 * 1024:
+            fields = _diff_paths(old, new)[:12] if isinstance(old, dict) else ["<keine JSON-Objekt>"]
+            logger.warning("Anmeldung aus der Sandbox nicht zurueckgeschrieben (%s), abweichend: %s",
+                           real, ", ".join(fields) or "Groesse")
+            _record_cred_sync(real, fields or ["Groesse"])
+            return
     except (OSError, ValueError):
         logger.warning("Anmeldung aus der Sandbox nicht zurueckgeschrieben: %s", real)
         return
@@ -90,6 +169,7 @@ def _sync_back_codex_auth(private: Path, real: Path, before: bytes) -> None:
         with os.fdopen(fd, "wb") as f:
             f.write(after)
         os.replace(tmp, real)
+        _record_cred_sync(real, None)
     except OSError:
         tmp.unlink(missing_ok=True)
         logger.warning("Anmeldung konnte nicht zurueckgeschrieben werden: %s", real)
@@ -158,7 +238,12 @@ def _run_codex_exec(
         private_home = tmp / "codex-home"
         private_home.mkdir(mode=0o700)
         auth_before = None
-        if codex_bin is not None and sandbox.available():
+        # Erst die Sandbox fragen (fail-closed), dann die CLI (Zweitpruefung
+        # 2026-11-07: sonst haette eine fehlende CLI die Sandbox umgangen).
+        sandbox_on = _sandbox_on()
+        if codex_bin is None:
+            raise LlmUnavailableError("codex nicht gefunden – polaris-curator llm-check")
+        if sandbox_on:
             # Auch ohne auth.json in der Sandbox (Anmeldung dann z. B. ueber
             # die Umgebung, die hier geleert ist): lieber laut scheitern als
             # still ohne Sandbox laufen (Zweitmeinung 2026-11-04).
@@ -219,26 +304,35 @@ def call_llm(
     Ersatzmodell laufen ueber die Claude-Code-CLI. Bilder (Mail-Anhaenge)
     kann dieser Weg nicht mitgeben - sie entfallen mit Warnung, der Text des
     Dokuments wird trotzdem kuratiert."""
+    usage.mark(f"llm:runtime:{cfg.runtime}")  # Nutzungszaehler (ADR 003)
     if cfg.runtime == "command":
         if images:
             logger.warning("runtime command: %d Bild(er) entfallen (nur Text wird kuratiert)", len(images))
         try:
             return _run_command(prompt, cfg.model, cfg, schema)
+        except LlmSandboxError:
+            raise
         except LlmUnavailableError:
             if not cfg.fallback_model or cfg.fallback_model == cfg.model:
                 raise
+            usage.mark("llm:fallback_model")
             return _run_command(prompt, cfg.fallback_model, cfg, schema)
     if cfg.runtime == "claude":
         if images:
             logger.warning("runtime claude: %d Bild(er) entfallen (nur Text wird kuratiert)", len(images))
         try:
             return _run_claude(prompt, cfg.model, cfg, schema)
+        except LlmSandboxError:
+            raise
         except LlmUnavailableError:
             if not cfg.fallback_model or cfg.fallback_model == cfg.model:
                 raise
+            usage.mark("llm:fallback_model")
             return _run_claude(prompt, cfg.fallback_model, cfg, schema)
     try:
         return _run_codex_exec(prompt, cfg.model, cfg, images, schema)
+    except LlmSandboxError:
+        raise
     except LlmUnavailableError as first:
         error = first
     claude_model = getattr(cfg, "claude_fallback_model", None)
@@ -248,8 +342,10 @@ def call_llm(
     # Anhaenge), die der Claude-Weg nicht mitgeben kann, bleibt fallback_model.
     if claude_model and not images:
         logger.warning("Codex nicht erreichbar (%s) - Ersatz: Claude %s", str(error)[:200], claude_model)
+        usage.mark("llm:claude_fallback")
         return _run_claude(prompt, claude_model, cfg, schema)
     if cfg.fallback_model:
+        usage.mark("llm:fallback_model")
         return _run_codex_exec(prompt, cfg.fallback_model, cfg, images, schema)
     raise error
 
@@ -276,7 +372,10 @@ def _run_claude(prompt: str, model: str, cfg: CuratorConfig, schema: dict | None
         tmp = Path(tmp_dir)
         cred_src = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / ".credentials.json"
         cred_before = None
-        if claude_bin is not None and sandbox.available():
+        sandbox_on = _sandbox_on()  # fail-closed vor der CLI-Pruefung
+        if claude_bin is None:
+            raise LlmUnavailableError("claude nicht gefunden – polaris-curator llm-check")
+        if sandbox_on:
             private_cfg = tmp / "claude-config"
             private_cfg.mkdir(mode=0o700)
             if cred_src.is_file():
@@ -419,8 +518,11 @@ def _run_command(prompt: str, model: str, cfg: CuratorConfig, schema: dict | Non
         # leeres Home; Anmeldedaten o. Ae. nur ueber command_sandbox_ro/_rw
         # in der lokalen curator.yaml (Projekt-Overrides koennen das nicht).
         binary = sandbox.resolve_binary(argv[0]) if argv else None
-        if binary is not None:
-            argv[0] = str(binary)
+        sandbox_on = _sandbox_on()  # fail-closed vor der CLI-Pruefung
+        if binary is None:
+            raise LlmUnavailableError(f"{argv[0] if argv else 'command'} nicht gefunden – polaris-curator llm-check")
+        argv[0] = str(binary)
+        if sandbox_on:
             # Den Programmordner nur freigeben, wenn er eigens der CLI gehoert;
             # liegt sie im Home, in ~/.local/bin o. Ae., nur die Datei selbst.
             home = Path.home()

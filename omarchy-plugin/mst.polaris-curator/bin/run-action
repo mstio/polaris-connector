@@ -4,6 +4,8 @@
 set -uo pipefail
 
 CLI="$(command -v polaris-curator || true)"
+# Nutzungszaehler: Widget-Aufrufe getrennt von Hand-Aufrufen (ADR 003).
+export POLARIS_USAGE_VIA=widget
 if [ -z "$CLI" ]; then
   jq -n '{ok:false, error:"polaris-curator is not installed or not on PATH"}'
   exit 0
@@ -33,7 +35,7 @@ manual_run() {
     jq -n '{ok:false, error:"Ein manueller Curator-Lauf läuft bereits."}'
     exit 0
   fi
-  mkdir -p "$STATE"
+  mkdir -p "$STATE" && chmod 700 "$STATE"
   rm -f -- "$OUT"
   # Laufwerks-Dienst wie beim Timer-Lauf (Drop-in von install.sh, falls vorhanden)
   local storage props=()
@@ -79,6 +81,7 @@ case "$action" in
       folder) target="$path" ;;
       *) jq -n --arg kind "$kind" '{ok:false, error:("Unknown target: " + $kind)}'; exit 0 ;;
     esac
+    PYTHONPATH="$(dirname "$(readlink -f "$CLI")")/.." python3 -m polaris_curator.usage "widget:open:$kind" >/dev/null 2>&1 || true
 
     # An uninitialised curated file is not an error: open the project folder
     # so the user still lands in the right place.

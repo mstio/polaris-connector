@@ -6,6 +6,7 @@ wird hart codiert.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
@@ -46,9 +47,24 @@ INBOX_DIR = HOME / "Downloads" / "polaris-inbox"
 DEFAULT_PROJECT_ROOT_CANDIDATES = [HOME / "Projekte"]
 
 
+# Ordner, die Polaris selbst anlegt und die Chat-Inhalte, Titel oder Zustand
+# enthalten: nur fuer den eigenen Benutzer (0700), auch wenn sie schon mit 0755
+# existieren. Schuetzt, falls das Home fuer andere Konten durchquerbar ist
+# (nach dem Hinweis von HANCORE-linux, Marktplatz #13877, 2026-11-08).
+def private_dirs() -> tuple[Path, ...]:
+    return (CONFIG_DIR, DATA_DIR, STATE_DIR, INBOX_DIR)  # zur Laufzeit (Tests biegen um)
+
+
 def ensure_dirs() -> None:
     for d in (CONFIG_DIR, DATA_DIR, PENDING_DIR, PROCESSED_DIR, FAILED_DIR, CONFLICTS_DIR, EXPANDED_DIR, STATE_DIR, INBOX_DIR):
         d.mkdir(parents=True, exist_ok=True)
+    for d in private_dirs():
+        if d.is_symlink():
+            continue  # Ziel gehoert dem Nutzer; install.sh meldet es
+        try:
+            d.chmod(0o700)
+        except OSError as exc:  # z. B. fremder Eigentuemer oder FAT/rclone-Ziel: laut melden
+            logging.getLogger(__name__).warning("Rechte von %s nicht auf 700 gesetzt: %s", d, exc)
 
 
 @dataclass

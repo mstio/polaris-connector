@@ -27,6 +27,8 @@ STATE="$HOME/.local/state/polaris/update-check.json"
 # Fuer Tests austauschbar; Standard sind die echten Programme im Repo.
 INSTALL="${POLARIS_UPDATE_INSTALL:-$REPO/install.sh}"
 HEALTH="${POLARIS_UPDATE_HEALTH:-$REPO/curator/bin/polaris-curator health --json}"
+SYSTEMCTL="${POLARIS_UPDATE_SYSTEMCTL:-systemctl}"
+LOG_DIR="$HOME/.local/state/polaris"
 
 YES=0 CHECK=0
 for arg in "$@"; do
@@ -51,10 +53,29 @@ version() {
 # als git-Checkout unter ~/.local/share/polaris/extras/ (nur Fast-Forward),
 # die Widgets per 'omarchy plugin update' (nur wenn sie git-verwaltet sind).
 # Fehler hier sind nur Hinweise; Polaris selbst ist dann schon aktualisiert.
+# Seit Gutachten Codex 2026-11-07: Fremdcode der Extras nicht ungesehen ziehen.
+# Ohne Terminal bzw. mit --yes nur anzeigen, was neu waere; nachziehen nach
+# Zustimmung im Terminal oder mit POLARIS_UPDATE_EXTRAS=1.
+extras_ok() {
+  [ "${POLARIS_UPDATE_EXTRAS:-0}" = 1 ] && return 0
+  [ "$YES" = 1 ] && return 1
+  [ -t 0 ] || return 1
+  local answer
+  read -r -p "$1 [j/N] " answer
+  case "$answer" in j|J|y|Y|ja|Ja) return 0 ;; *) return 1 ;; esac
+}
+
 update_extras() {
-  local ob="$HOME/.local/share/polaris/extras/omarchy-backup" id
-  if [ -d "$ob/.git" ]; then
-    if timeout 60 git -C "$ob" pull --ff-only --quiet 2>/dev/null; then
+  local ob="$HOME/.local/share/polaris/extras/omarchy-backup" id pd
+  if [ -d "$ob/.git" ] && ! timeout 60 git -C "$ob" fetch --quiet 2>/dev/null; then
+    echo "polaris update: omarchy-backup in $ob nicht abgefragt (Netz oder kein Upstream)" >&2
+  elif [ -d "$ob/.git" ] && [ -n "$(git -C "$ob" rev-list HEAD..@{u} 2>/dev/null)" ]; then
+    echo "omarchy-backup: neue Commits"
+    git -C "$ob" log --oneline HEAD..@{u} | head -n 20
+    git -C "$ob" diff --stat HEAD @{u} | tail -n 15
+    if ! extras_ok "omarchy-backup aktualisieren?"; then
+      echo "omarchy-backup nicht aktualisiert - nach Durchsicht: POLARIS_UPDATE_EXTRAS=1 polaris update"
+    elif timeout 60 git -C "$ob" pull --ff-only --quiet 2>/dev/null; then
       echo "omarchy-backup: $(git -C "$ob" log -1 --format='%h %s')"
     else
       echo "polaris update: omarchy-backup in $ob nicht aktualisiert (lokale Aenderungen oder Netz)" >&2
@@ -62,12 +83,36 @@ update_extras() {
   fi
   command -v omarchy >/dev/null || return 0
   for id in mst.polaris-curator mst.agent-launchers mst.omarchy-backup; do
-    [ -d "$HOME/.config/omarchy/plugins/$id/.git" ] || continue
+    pd="$HOME/.config/omarchy/plugins/$id"
+    [ -d "$pd/.git" ] || continue
+    timeout 60 git -C "$pd" fetch --quiet 2>/dev/null || continue
+    [ -n "$(git -C "$pd" rev-list HEAD..@{u} 2>/dev/null)" ] || continue
+    echo "Widget $id: neue Commits"
+    git -C "$pd" log --oneline HEAD..@{u} | head -n 20
+    if ! extras_ok "Widget $id aktualisieren (omarchy plugin update)?"; then
+      echo "Widget $id nicht aktualisiert - selbst: omarchy plugin update $id"
+      continue
+    fi
     timeout 120 omarchy plugin update "$id" --yes >/dev/null 2>&1 \
       || echo "polaris update: Widget $id nicht aktualisiert (omarchy plugin update $id)" >&2
   done
 }
 health_level() { $HEALTH 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("level","error"))' 2>/dev/null || echo error; }
+# Kennungen der Health-Pruefungen mit Stufe "error", sortiert, eine je Zeile
+# (seit 2026-11-07, ADR 003): ein Update wird zurueckgenommen, sobald eine
+# Pruefung NEU rot ist - auch wenn vorher schon eine andere rot war.
+health_errors() {
+  $HEALTH 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("health-unlesbar"); sys.exit()
+ids = [c.get("id", "?") for c in d.get("checks", []) if c.get("level") == "error"]
+if not ids and d.get("level", "error") == "error":
+    ids = ["gesamt"]
+print("\n".join(ids))' 2>/dev/null | sort -u || echo health-unlesbar
+}
 
 write_state() {  # behind local remote
   mkdir -p "${STATE%/*}" 2>/dev/null || return 0
@@ -75,7 +120,15 @@ write_state() {  # behind local remote
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" >"$STATE.tmp" && mv -f "$STATE.tmp" "$STATE"
 }
 
-[ -d "$REPO/.git" ] || fail "$REPO ist kein git-Checkout. Einmal auf git umsteigen: docs/install.md, Abschnitt \"Switching from the install bundle to a git checkout\"."
+# -e: im Live-Stand (git worktree, ADR 003) ist .git eine Datei.
+APP_DIR="$HOME/.local/share/polaris/app"
+[ -e "$REPO/.git" ] || fail "$REPO ist kein git-Checkout. Einmal auf git umsteigen: docs/install.md, Abschnitt \"Switching from the install bundle to a git checkout\"."
+g rev-parse --git-dir >/dev/null 2>&1 ||
+  fail "$REPO ist ein worktree, dessen Hauptcheckout fehlt - Live-Stand neu anlegen (docs/AGENTEN-LEITFADEN.md, 'Live und Entwicklung getrennt')."
+if [ "$REPO" != "$APP_DIR" ] && [ -f "$APP_DIR/.git" ] \
+    && g worktree list --porcelain 2>/dev/null | grep -qxF "worktree $APP_DIR"; then
+  fail "Live laeuft als worktree unter $APP_DIR - Update dort ausfuehren ('polaris update'), nicht im Entwicklungs-Checkout."
+fi
 upstream="$(g rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" ||
   fail "der Branch $(g branch --show-current) hat kein Upstream (git branch --set-upstream-to origin/main)"
 
@@ -119,7 +172,17 @@ ls "$HOME"/.config/systemd/user/polaris-*.service >/dev/null 2>&1 || install_arg
 [ -d "$HOME/.config/ai-agents" ] || install_args+=(--no-memory)
 install_args+=(--no-backup)
 
-before="$(health_level)"
+# Nie den Code unter einem laufenden Lauf austauschen (bash liest Skripte
+# stueckweise, Python laedt Module nach): dann spaeter erneut (Exit 75).
+# Direkt vor dem Wechsel geprueft, nicht vor der Rueckfrage.
+for unit in polaris-curator.service polaris-curator-manual.service polaris-bridge.service \
+            polaris-memory-mirror.service polaris-radar.service polaris-radar-update.service; do
+  if "$SYSTEMCTL" --user is-active --quiet "$unit" 2>/dev/null; then
+    echo "polaris update: $unit laeuft gerade - nichts geaendert, bitte spaeter erneut." >&2
+    exit 75
+  fi
+done
+before="$(health_level)" before_errors="$(health_errors)"
 g merge --ff-only --quiet "$upstream" || fail "Fast-Forward fehlgeschlagen; nichts geaendert."
 if ! "$INSTALL" "${install_args[@]}"; then
   install_failed=1
@@ -130,16 +193,24 @@ fi
 # "Update verfuegbar" (Rueckmeldung von bernhard2804, 2026-11-05). Beim Rueckweg
 # unten wird er wieder auf den alten Stand gesetzt.
 write_state 0 "$(version HEAD)" "$(version HEAD)"
-after="$(health_level)"
+after="$(health_level)" after_errors="$(health_errors)"
+new_errors="$(comm -13 <(printf '%s\n' "$before_errors" | sed '/^$/d') <(printf '%s\n' "$after_errors" | sed '/^$/d') | tr '\n' ' ')"
 
-if [ "$install_failed" = 1 ] || { [ "$after" = error ] && [ "$before" != error ]; }; then
-  echo "polaris update: install.sh oder Health-Check nach dem Update fehlgeschlagen (vorher $before, nachher $after) - zurueck auf $(g rev-parse --short "$old")." >&2
+if [ "$install_failed" = 1 ] || [ -n "${new_errors// /}" ]; then
+  log="$LOG_DIR/update-$(date +%Y%m%d-%H%M%S).log"
+  mkdir -p "$LOG_DIR" 2>/dev/null
+  echo "polaris update: install.sh oder Health-Check nach dem Update fehlgeschlagen (vorher $before, nachher $after; neu rot: ${new_errors:-keine}; install.sh fehlgeschlagen: $install_failed) - zurueck auf $(g rev-parse --short "$old"). Protokoll: $log" >&2
   g reset --hard --quiet "$old"
-  "$INSTALL" "${install_args[@]}" >/dev/null 2>&1 || echo "polaris update: auch die Wiederherstellung mit install.sh meldet Fehler - bitte $INSTALL von Hand ausfuehren." >&2
+  { echo "Rueckweg $(date -Iseconds): $(g rev-parse --short "$upstream") -> $(g rev-parse --short "$old"); neu rot: ${new_errors:-keine}"
+    "$INSTALL" "${install_args[@]}"; } >"$log" 2>&1 \
+    || echo "polaris update: auch die Wiederherstellung mit install.sh meldet Fehler ($log) - bitte $INSTALL von Hand ausfuehren." >&2
   write_state "$behind" "$(version HEAD)" "$(version "$upstream")"
   exit 2
 fi
 
+case "$after_errors" in
+  *health-unlesbar*) echo "polaris update: WARNUNG - Health-Check nicht lesbar (vorher wie nachher), das Update ist ungeprueft. Pruefen: polaris-curator health" >&2 ;;
+esac
 echo "Polaris auf $(version HEAD) aktualisiert (Health-Check: $after)."
 update_extras
 exit 0

@@ -11,9 +11,12 @@ Bekannte Grenze: Mit Netz (codex) teilt die Sandbox den Netz-Namensraum des
 Rechners; abstrakte Unix-Sockets anderer Programme bleiben damit erreichbar
 (der D-Bus-Sitzungsbus nicht, er liegt als Datei unter /run/user).
 
-bubblewrap bringt Omarchy als Abhaengigkeit mit (flatpak, webkit2gtk); fehlt
-es oder sind unprivilegierte Namensraeume gesperrt, laeuft der Aufruf ohne
-Sandbox und der Health Check meldet das (`status()`), nie still.
+bubblewrap bringt Omarchy als Abhaengigkeit mit (flatpak, webkit2gtk). Fehlt
+es oder sind unprivilegierte Namensraeume gesperrt, schlaegt der Aufruf seit
+2026-11-07 geschlossen fehl (SandboxUnavailable, ADR 003): Fremdinhalt wird
+dann nicht verarbeitet, bis die Sandbox wieder geht; der Health Check nennt den
+Grund (`status()`). Ohne Sandbox nur mit ausdruecklichem POLARIS_NO_SANDBOX=1.
+Vorher lief der Aufruf ungeschuetzt weiter und wurde nur gemeldet.
 """
 from __future__ import annotations
 
@@ -74,12 +77,29 @@ _ENV_ALLOW = ("LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "SSL_CERT_FILE", "SSL_
               "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
 
 
+class SandboxUnavailable(RuntimeError):
+    """bubblewrap fehlt oder ist nicht nutzbar, und POLARIS_NO_SANDBOX=1 ist
+    nicht gesetzt: Fremdinhalt wird nicht ungeschuetzt verarbeitet."""
+
+
+def enabled() -> bool:
+    """True: in der Sandbox ausfuehren. False nur bei ausdruecklichem
+    POLARIS_NO_SANDBOX=1. Sonst SandboxUnavailable (geschlossen fehlschlagen)."""
+    if os.environ.get("POLARIS_NO_SANDBOX") == "1":
+        return False
+    if available():
+        return True
+    raise SandboxUnavailable(f"{status()} - Fremdinhalt wird nicht ohne Sandbox verarbeitet "
+                             "(bewusst ohne: POLARIS_NO_SANDBOX=1)")
+
+
 def wrap(argv: list[str], *, ro: list[str | Path] = (), rw: list[str | Path] = (),
          net: bool = False, home: str | Path | None = None,
          env: dict[str, str] | None = None) -> list[str]:
     """argv in der Sandbox mit geleerter Umgebung (nur _ENV_ALLOW, PATH,
-    HOME und `env`); ohne nutzbares bwrap unveraendert (siehe status)."""
-    if not available():
+    HOME und `env`). Bei POLARIS_NO_SANDBOX=1 unveraendert; ist bwrap nicht
+    nutzbar, SandboxUnavailable (seit 2026-11-07)."""
+    if not enabled():
         return list(argv)
     out = _base(net) + ["--clearenv", "--setenv", "PATH", "/usr/bin"]
     for key in _ENV_ALLOW:

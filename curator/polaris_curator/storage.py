@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 
 
@@ -39,12 +40,20 @@ def ensure_dir(directory: Path) -> None:
 
 def atomic_write_text(path: Path, content: str) -> None:
     ensure_dir(path.parent)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
+    # Eindeutiger Zwischenname (seit 2026-11-07, ADR 003; wie die Bridge):
+    # ein fester "<name>.tmp" liess zwei gleichzeitige Schreiber (Timer-Lauf,
+    # Widget-Lauf) dieselbe Zwischendatei teilen.
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     # Zeitstempel ausdruecklich setzen: Auf dem rclone-Drive-Mount blieb nach
     # einem gescheiterten Upload (2026-10-04) die alte Aenderungszeit am
     # Objekt haengen, obwohl der Inhalt spaeter ersetzt wurde - eine knowledge.md

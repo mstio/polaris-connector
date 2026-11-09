@@ -122,7 +122,15 @@ case "$UI_LANG" in en|de) ;; *) echo "--language: en oder de" >&2; exit 2 ;; esa
 # Programmdateien kommen an einen festen Ort, damit Befehle, Units und Native
 # Host nicht auf ~/Downloads zeigen. Aus einem git-Checkout bleibt alles dort.
 APP_DIR="$HOME/.local/share/polaris/app"
-if [ ! -d "$REPO/.git" ] && [ "$REPO" != "$APP_DIR" ]; then
+# Live laeuft als git worktree dieses Checkouts (ADR 003): Ein install.sh von
+# hier wuerde Befehle und Native Host still auf den Entwicklungsstand biegen.
+# Bewusst umziehen nur mit POLARIS_INSTALL_HERE=1.
+if [ "$REPO" != "$APP_DIR" ] && [ "${POLARIS_INSTALL_HERE:-0}" != 1 ] && [ -f "$APP_DIR/.git" ] \
+    && git -C "$REPO" worktree list --porcelain 2>/dev/null | grep -qxF "worktree $APP_DIR"; then
+  echo "install.sh: Live laeuft als worktree unter $APP_DIR - dort ausfuehren ($APP_DIR/install.sh) oder 'polaris update'. Bewusst hierher umziehen: POLARIS_INSTALL_HERE=1." >&2
+  exit 2
+fi
+if [ ! -e "$REPO/.git" ] && [ "$REPO" != "$APP_DIR" ]; then
   echo "== Programmdateien nach $APP_DIR"
   if [ "$DRY" = 1 ]; then
     echo "  [dry-run] Kopie von $REPO nach $APP_DIR (vorhandene Fassung wird gesichert)"
@@ -350,13 +358,26 @@ GUIDE="$REPO/docs/AGENTEN-LEITFADEN.md"
 MEM="$HOME/.config/ai-agents"
 LOG=""
 if [ "$DRY" = 0 ]; then
-  mkdir -p "$HOME/.local/state/polaris"
+  # Private Polaris-Ordner nur fuer den eigenen Benutzer (Chats, Titel, Zustand),
+  # auch bei bestehenden Installationen (nach dem Hinweis von HANCORE-linux,
+  # Marktplatz #13877, 2026-11-08). Symlinks bleiben unangetastet (Ziel gehoert
+  # dem Nutzer); der Download-Eingang wird nur enger, nie angelegt.
+  mkdir -p "$HOME/.config/polaris" "$HOME/.local/share/polaris" "$HOME/.local/state/polaris" ||
+    die "Polaris-Ordner unter ~/.config, ~/.local/share oder ~/.local/state nicht anlegbar"
+  PRIVATE_WARN=()
+  for d in "$HOME/.config/polaris" "$HOME/.local/share/polaris" "$HOME/.local/state/polaris" \
+           "$HOME/Downloads/polaris-inbox"; do
+    [ -d "$d" ] || continue
+    if [ -L "$d" ]; then PRIVATE_WARN+=("$d ist ein Symlink, Rechte nicht geaendert (selbst auf 700 setzen)")
+    elif ! chmod 700 "$d"; then PRIVATE_WARN+=("Rechte von $d nicht auf 700 gesetzt"); fi
+  done
   LOG="$HOME/.local/state/polaris/install-$(date +%Y%m%d-%H%M%S).log"
   exec > >(tee -a "$LOG") 2>&1
   say "INSTALL: $(date -Iseconds) Protokoll $LOG"
   say "INSTALL: Optionen ${ORIG_ARGS[*]:-(gefuehrt)}"
   if [ "$NO_NEW" = 1 ]; then say "INSTALL: richtet nichts Neues ein ($NO_NEW_REASON)"; fi
   say "INSTALL: Auswahl projects=${PROJECTS:-} runtime=${RUNTIME:-auto} chat_sources=${CHAT_SOURCES:-template} units=$UNITS widget=$WIDGET dock=$DOCK backup=$OBACKUP backup_target=${OB_TARGET:-} memory=$MEMORY memory_mirror=${MIRROR:-}"
+  for w in "${PRIVATE_WARN[@]}"; do warn "$w"; done   # erst jetzt: landet im Protokoll
 fi
 
 memory_note() {  # memory_note <Status>: Polaris-Eintrag im Maschinengedaechtnis
@@ -478,6 +499,14 @@ command -v python3 >/dev/null || die "python3 fehlt"
 python3 -c 'import yaml' 2>/dev/null || {
   die "PyYAML fehlt (Arch: sudo pacman -S python-yaml)"; }
 say "  python3 + PyYAML vorhanden"
+# Seit ADR 003 fail-closed: ohne nutzbares bubblewrap kuratiert Polaris nichts,
+# der Health Check ist rot und polaris update nimmt sich zurueck (Gremium agy 2026-11-09).
+if ! command -v bwrap >/dev/null; then
+  warn "bubblewrap (bwrap) fehlt - ohne Sandbox wird nichts kuratiert und polaris update rollt zurueck (sudo pacman -S bubblewrap)"
+elif ! timeout 10 bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all -- /usr/bin/true >/dev/null 2>&1; then
+  # Zweitmeinung 2026-11-09: auf Omarchy ist bwrap meist da, aber evtl. gesperrt.
+  warn "bubblewrap vorhanden, aber nicht nutzbar (unprivilegierte Namensraeume gesperrt?) - siehe Health-Zeile Modell"
+fi
 command -v rsync >/dev/null || warn "rsync fehlt - Spiegel des Maschinengedaechtnisses geht erst danach (sudo pacman -S rsync)"
 
 step "Befehle in $BIN_DIR"
@@ -707,7 +736,15 @@ fi
 
 if [ -d "$HOME/.config/omarchy-backup/paths.d" ]; then
   step "omarchy-backup (Programmordner im Backup)"
-  if grep -rqsF -- "${REPO/#$HOME/\~}" "$HOME/.config/omarchy-backup/paths.d" \
+  if [ -f "$REPO/.git" ]; then
+    # Live-Stand als git worktree (ADR 003): gesichert wird der Hauptcheckout
+    # samt Historie; der Live-Stand entsteht nach einem Restore neu daraus.
+    say "  Live-Stand (git worktree): gesichert wird der Hauptcheckout, nicht dieser Ordner"
+    main="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; main="${main%/.git}"
+    if [ -n "$main" ] && ! grep -rqsF -e "${main/#$HOME/\~}" -e "$main" "$HOME/.config/omarchy-backup/paths.d"; then
+      warn "Hauptcheckout $main steht nicht in omarchy-backup (paths.d): z. B. 'repo ${main/#$HOME/\~} full' eintragen"
+    fi
+  elif grep -rqsF -- "${REPO/#$HOME/\~}" "$HOME/.config/omarchy-backup/paths.d" \
       || grep -rqsF -- "$REPO" "$HOME/.config/omarchy-backup/paths.d"; then
     say "  Programmordner ist bereits erfasst"
   else
@@ -753,7 +790,9 @@ Für Agenten: Jeden Punkt dem Nutzer kurz vorstellen (was neu ist, was es ihm br
   cp -- "$REPO/CHANGELOG.md" "$SEEN"
   if [ -s "$NEWS" ]; then
     step "Neu seit dem letzten Update"
-    sed -n '/^## Update vom/,$p' "$NEWS" | head -40 | sed 's/^/  /'
+    # awk statt head: head beendet die Leitung vorzeitig, sed stirbt an
+    # SIGPIPE, und mit pipefail brach install.sh hier ab (2026-11-07).
+    sed -n '/^## Update vom/,$p' "$NEWS" | awk 'NR <= 40 { print "  " $0 }'
     warn "Neuerungen seit dem letzten Update in $(tilde "$NEWS"): mit dem Nutzer durchgehen und gemeinsam entscheiden, was eingestellt oder übernommen wird; danach die Datei löschen."
   fi
 fi
@@ -780,9 +819,23 @@ if [ "$MEMORY" = 1 ] && [ -d "$REPO/memory/template" ]; then
     if cmp -s "$REPO/memory/tools/$t" "$MEM/tools/$t"; then
       say "  $t: ok"
     else
+      # Aktiver Guard-Hook (in ~/.claude/settings.json eingetragen): Updates
+      # sind die Lieferkette eines Schutzwerkzeugs. Den Unterschied ins
+      # Protokoll schreiben und laut melden (ADR 003, seit 2026-11-07).
+      # Seit Gutachten agy 2026-11-07: ein aktiver Hook wird nicht still ersetzt,
+      # nur mit ausdruecklicher Freigabe (POLARIS_ADOPT_GUARD=1).
+      if [ -e "$MEM/tools/$t" ] && grep -qsF -- "tools/$t" "$HOME/.claude/settings.json"; then
+        diff -u --label "aktiv" --label "neu" -- "$MEM/tools/$t" "$REPO/memory/tools/$t" | head -n 200 | sed 's/^/    | /' || true
+        if [ "${POLARIS_ADOPT_GUARD:-0}" != 1 ]; then
+          warn "aktiver $t NICHT ersetzt (Unterschied oben bzw. im Protokoll). Nach Durchsicht übernehmen: POLARIS_ADOPT_GUARD=1 $REPO/install.sh --yes --only-existing"
+          continue
+        fi
+        warn "aktiver $t wird auf Freigabe (POLARIS_ADOPT_GUARD=1) ersetzt"
+      fi
       [ -e "$MEM/tools/$t" ] && backup "$MEM/tools/$t"
       run install -m 755 "$REPO/memory/tools/$t" "$MEM/tools/$t"
-      say "  $t: bereitgelegt (nicht eingeschaltet)"
+      if grep -qsF -- "tools/$t" "$HOME/.claude/settings.json"; then say "  $t: übernommen (aktiv)"
+      else say "  $t: bereitgelegt (nicht eingeschaltet)"; fi
     fi
   done
   # Gemeinsame Skills (seit 2026-10-16); memlint --link verlinkt sie unten

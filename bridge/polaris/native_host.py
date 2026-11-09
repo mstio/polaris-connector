@@ -50,7 +50,7 @@ import uuid
 
 from pathlib import Path
 
-from . import config, mapping, pipeline, storage, tab_memory
+from . import config, mapping, pipeline, storage, tab_memory, usage
 
 PROTOCOL_VERSION = 1
 IDLE_TIMEOUT_SECONDS = 120
@@ -176,6 +176,8 @@ def handle_map_project(request: dict) -> dict:
 def handle(request: dict) -> dict:
     req_id = request.get("id") if isinstance(request, dict) else None
     kind = request.get("type") if isinstance(request, dict) else None
+    if isinstance(kind, str) and kind.isascii() and len(kind) <= 40:
+        usage.mark(f"bridge:native:{kind}")  # Nutzungszaehler (ADR 003), je Host-Prozess einmal
     if kind == "ping":
         return {"id": req_id, "ok": True, "version": PROTOCOL_VERSION}
     if kind == "list-folders":

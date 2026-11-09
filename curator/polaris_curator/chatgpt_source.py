@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import layout, state as state_mod
+from . import layout, state as state_mod, usage
 
 
 @dataclass
@@ -301,4 +301,6 @@ def load_new_messages(project: Path, state: state_mod.CuratorState,
             result.append(m)
 
     result.sort(key=lambda m: (m.local_date, m.captured_at, m.conversation_id))
+    for src in sorted({m.source for m in result}):  # Nutzungszaehler (ADR 003)
+        usage.mark(f"source:{src}")
     return result

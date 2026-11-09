@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import config, mapping, pipeline, storage
+from . import config, mapping, pipeline, storage, usage
 from .matching import list_candidate_dirs, normalize_name
 
 
@@ -400,6 +400,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    usage.count(f"bridge:cli:{args.command}")  # Nutzungszaehler (ADR 003)
     return args.func(args)
 
 

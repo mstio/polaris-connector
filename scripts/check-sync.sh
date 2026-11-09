@@ -27,7 +27,7 @@ for t in claude-guard-hook.py claude-guard-einschalten.sh home-snapshots-einrich
     # nie blind uebernehmen (Fable-Pruefung 2026-11-05).
     echo "FEHLER: memory/tools/$t weicht von $live ab:" >&2
     diff -u "memory/tools/$t" "$live" >&2 || true
-    echo "  Jede Zeile pruefen. Repo -> live: install.sh; live -> Repo nur nach Pruefung: cp '$live' memory/tools/$t." >&2
+    echo "  Jede Zeile pruefen. Repo -> live: install.sh (ein aktiver Hook nur mit POLARIS_ADOPT_GUARD=1 install.sh --yes --only-existing); live -> Repo nur nach Pruefung: cp '$live' memory/tools/$t." >&2
     fail=1
   fi
 done

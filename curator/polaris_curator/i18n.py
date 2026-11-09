@@ -192,8 +192,15 @@ EN: dict[str, str] = {
         'git checkout, updated by omarchy plugin update',
     'Kopie aktuell':
         'copy up to date',
-    'Prüfung nicht möglich (offline?) – polaris update --check':
-        'check not possible (offline?) – polaris update --check',
+    ', zuletzt geprüft {age}': ', last checked {age}',
+    'erneuerte Anmeldung nicht übernommen ({file}: {fields}) – ggf. neu anmelden':
+        'renewed login not taken over ({file}: {fields}) – log in again if needed',
+    'keiner offen; {n} verwaiste Zwischendatei(en), z. B. {item} – nach Prüfung löschen':
+        'none open; {n} orphaned temporary file(s), e.g. {item} – delete after checking',
+    'Sandbox nicht nutzbar – Kuratierung ausgesetzt: {problem}': 'sandbox unusable – curation paused: {problem}',
+    'zuletzt geprüft {age} – polaris update --check': 'last checked {age} – polaris update --check',
+    'Prüfung läuft bzw. nicht möglich (offline?) – polaris update --check':
+        'check running or not possible (offline?) – polaris update --check',
     'verfügbar: {local} → {remote} – polaris update':
         'available: {local} → {remote} – polaris update',
     'aktuell ({local})':

@@ -16,7 +16,7 @@ import email.header
 import os
 from pathlib import Path
 
-from . import layout, state as state_mod
+from . import layout, state as state_mod, usage
 
 INDEX_NAME = "dokumente-index.md"
 _HEADER_READ_BYTES = 64 * 1024
@@ -82,6 +82,7 @@ def _rel(project: Path, path: Path) -> str:
 
 
 def build_index(project: Path) -> str:
+    usage.mark("docs_index")  # Nutzungszaehler (ADR 003)
     st = state_mod.load_state(project)
     lines = [
         "# Dokumente und Mail-Anhänge",
