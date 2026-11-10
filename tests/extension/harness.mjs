@@ -31,6 +31,7 @@ export function fakeServer(conversations, { token = 'tok' } = {}) {
     const body = m && conversations[m[1]];
     if (!m || body === undefined) return { ok: false, status: 404, json: async () => ({}) };
     if (typeof body === 'number') return { ok: false, status: body, json: async () => ({}) };
+    if (body instanceof Error) throw body; // Netz- oder Programmfehler beim Abruf
     if ((opts.headers || {}).authorization !== `Bearer ${server.token}`) return { ok: false, status: 401, json: async () => ({}) };
     return { ok: true, status: 200, json: async () => structuredClone(body) };
   };

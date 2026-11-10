@@ -5,6 +5,20 @@ set -uo pipefail
 
 LAST="${XDG_STATE_HOME:-$HOME/.local/state}/polaris/widget-status.json"
 
+# Rechte eines vorhandenen Caches vor jedem Ausstieg reparieren, nicht erst nach
+# einem erfolgreichen Lauf: Altbestand (vor 0.3.3, mit umask 022 geschrieben)
+# kann Chat-Titel enthalten, ebenso ein liegengebliebenes "$LAST.tmp" aus Fassungen
+# vor 0.3.3. Nur im eigenen, schon abgesicherten Ordner und nur eigene Dateien, keine
+# Symlinks: sonst koennte in einem geteilten Ordner ein untergeschobener Link das
+# chmod auf fremde Ziele lenken (Zweitpruefung 2026-11-10).
+# Nach dem Hinweis von HANCORE-linux, Marktplatz #13877, 2026-11-10.
+d="${LAST%/*}"
+if [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] && chmod 700 "$d" 2>/dev/null; then
+  for f in "$LAST" "$LAST.tmp"; do
+    if [ -f "$f" ] && [ ! -L "$f" ] && [ -O "$f" ]; then chmod 600 "$f" 2>/dev/null; fi
+  done
+fi
+
 # Bei gesperrtem Bildschirm oder waehrend logind einschlaeft das Drive-Laufwerk
 # nicht anfassen, sondern den letzten Stand zeigen (Begruendung in polaris-awake).
 if command -v polaris-awake >/dev/null && ! polaris-awake; then

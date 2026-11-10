@@ -191,15 +191,27 @@
   let apiBackoffUntil = 0;
   let apiBackoffMs = 0;
 
+  // Seit 0.4.6 nur Netzfehler von fetch, nicht jeder TypeError: ein
+  // Programmierfehler oder ein veraendertes Antwortformat ("TypeError: Cannot
+  // read properties ...") faellt auf die Seite zurueck. Gleiche Regel wie der
+  // Health Check (curator/polaris_curator/health.py, _TRANSIENT_ERROR).
   function isTransientApiError(err) {
     const s = String(err);
-    return /HTTP (429|5\d\d)\b/.test(s) || /NetworkError|Failed to fetch|TypeError|AbortError/.test(s);
+    return /HTTP (429|5\d\d)\b/.test(s)
+      || /^AbortError\b/.test(s)
+      || /^TypeError: (NetworkError|Failed to fetch|network error|Error in body stream|Load failed|Decoding failed)/.test(s);
   }
   const snapshotLastFetch = new Map(); // conversationId -> Zeitpunkt
   const snapshotLastVersion = new Map(); // conversationId -> update_time des zuletzt gesendeten
   let snapshotTimer = null;
 
+  // Erfolg ohne gesendeten Chat (unveraendert) meldet nur, wer zuletzt einen
+  // Fehler gemeldet hat - sonst blieb eine Warnung im Health Check stehen,
+  // obwohl die Schnittstelle wieder ging (0.4.6). Nicht bei jeder Abfrage:
+  // jede Meldung schreibt ueber den Native Host eine Datei.
+  let apiErrorReported = false;
   function apiStatus(status) {
+    if (status) apiErrorReported = !status.ok; // null (Seitenstart) ist kein Fehler
     api().runtime.sendMessage({ type: 'api-status', status });
   }
 
@@ -256,6 +268,9 @@
     const base = raw && (raw.update_time || raw.current_node);
     const version = base ? `${base}${idle ? ':idle' : ''}` : null;
     if (!force && version && snapshotLastVersion.get(conversationId) === version) {
+      // Nur hier: bei gesendetem Chat meldet der Erfolg weiter unten; eine
+      // Ablehnung durch die Bridge setzt keine Version, kommt also nie hierher.
+      if (apiErrorReported) apiStatus({ ok: true, at: new Date().toISOString() });
       return { handled: true, sent: 0 };
     }
     const res = await api().runtime.sendMessage({

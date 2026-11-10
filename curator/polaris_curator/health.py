@@ -140,17 +140,17 @@ CAPTURE_ERROR_FRESH = timedelta(hours=3)
 # ("error: TypeError: ..."), liest die Extension sehr wohl aus der Seite.
 # Nur Netzfehler von fetch zaehlen als voruebergehend, nicht jeder TypeError
 # (Gremium 2026-11-10): ein Programmierfehler der Extension ("TypeError:
-# Cannot read properties of undefined") soll 3 h sichtbar bleiben. Die
-# Extension 0.4.5 wertet noch jeden TypeError als voruebergehend; das naechste
-# Release zieht content.js (isTransientApiError) nach.
+# Cannot read properties of undefined") soll 3 h sichtbar bleiben. Gleiche
+# Regel in extension/content.js (isTransientApiError) seit 0.4.6.
 # Offen: Beginn einer Fehlerserie kennt die Statusdatei nicht (native_host.py).
 CAPTURE_TRANSIENT_FRESH = timedelta(minutes=30)
 _TRANSIENT_ERROR = re.compile(
     r"^(?:Error: (?:Unterhaltung|Sitzung): HTTP (?:429|5\d\d)\b"
-    r"|TypeError: (?:NetworkError|Failed to fetch|network error|Error in body stream|Load failed)"
+    r"|TypeError: (?:NetworkError|Failed to fetch|network error|Error in body stream|Load failed"
+    r"|Decoding failed)"
     r"|AbortError\b)")
-# Sonstiger TypeError: vermutlich Programmierfehler der Extension. 0.4.5
-# wartet dann und liest nicht aus der Seite; deshalb neutraler Text.
+# Sonstiger TypeError: vermutlich Programmierfehler der Extension. Bis 0.4.5
+# wartet sie dann, ab 0.4.6 liest sie aus der Seite; deshalb neutraler Text.
 _EXTENSION_ERROR = re.compile(r"^TypeError: ")
 
 

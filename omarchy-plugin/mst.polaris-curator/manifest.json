@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mst.polaris-curator",
   "name": "Polaris",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "author": "Matthias Stache",
   "license": "MIT",
   "description": "Bar widget for Polaris, a project memory for AI chats, meetings, mails and documents: shows new material per project, starts curation with your own AI CLI, opens the knowledge files, and a health check for capture, curation, backup, machine memory and security. Requires Polaris.",

@@ -198,6 +198,7 @@ class TestCaptureErrorFreshness(unittest.TestCase):
                       "TypeError: NetworkError when attempting to fetch resource.",
                       "TypeError: Failed to fetch", "TypeError: network error",
                       "TypeError: Error in body stream", "TypeError: Load failed",
+                      "TypeError: Decoding failed.",
                       "AbortError: The operation was aborted."):
             msg = self._check(0.2, ok_age_h=5, error=error)
             self.assertIn("wiederholt den Abruf", msg, error)
@@ -217,7 +218,7 @@ class TestCaptureErrorFreshness(unittest.TestCase):
 
     def test_extension_type_error_is_not_transient(self):
         # Programmierfehler der Extension, kein Netzfehler (Gremium 2026-11-10):
-        # 3 h sichtbar, ohne Aussage zum Seitenlesen (0.4.5 wartet dann nur).
+        # 3 h sichtbar, ohne Aussage zum Seitenlesen (bis 0.4.5 wartet sie, ab 0.4.6 liest sie aus der Seite).
         for error in ("TypeError: Cannot read properties of undefined (reading 'mapping')",
                       "TypeError: data is null"):
             for age in (0.2, 1):

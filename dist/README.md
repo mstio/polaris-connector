@@ -5,7 +5,7 @@ Mozilla (AMO, unlisted, add-on 3070992), as installed in Firefox. It lives
 here so that it is available right away after a reinstall, without a
 Developer Hub login.
 
-Install: `firefox dist/polaris-chatgpt-connector-0.4.4-signed.xpi`
+Install: `firefox dist/polaris-chatgpt-connector-0.4.6-signed.xpi`
 (or drag the file into a Firefox window), then in `about:addons` →
 Polaris → Permissions allow access to chatgpt.com / claude.ai.
 

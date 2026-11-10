@@ -6,8 +6,22 @@ Bridge, Curator, Installer und Werkzeuge. Hier stehen vor allem Dinge, die
 `install.sh` bzw. `polaris update` ungefragt mitändern oder die eine Nacharbeit
 verlangen. Einzelheiten stehen in der README.
 
-## Unveröffentlicht
+## 0.4.6 (2026-11-10)
 
+- **Erweiterung 0.4.6** (Auto-Update über `update_url`):
+  - Nach einem Fehler meldet sie den nächsten erfolgreichen Abruf auch dann,
+    wenn sich der Chat nicht geändert hat. Eine Warnung zur ChatGPT-Schnittstelle
+    bleibt so nicht mehr stehen, obwohl alles wieder geht.
+  - Als vorübergehend (warten statt aus der Seite lesen) gelten nur noch
+    HTTP 429/5xx und Netzfehler, nicht mehr jeder `TypeError`. Ein
+    Programmierfehler oder ein verändertes Antwortformat fällt auf die Seite
+    zurück. Gleiche Regel wie im Health Check.
+- **Widget 0.3.4:** Ein alter, lesbarer Status-Cache (vor 0.3.3) wird jetzt
+  bei jedem Aufruf auf `0600`/`0700` gesetzt, auch wenn der Bildschirm gesperrt
+  ist, die CLI fehlt oder der Status nicht gelesen werden konnte; bisher
+  geschah das erst nach einem erfolgreichen Lauf. Betrifft vor allem
+  Widget-Installationen ohne Connector mit eigenem `XDG_STATE_HOME`. Nach dem
+  Hinweis von HANCORE-linux im Omarchy-Plugin-Marktplatz (#13877).
 - Doku: Zweck und bewusste Grenzen des Sicherheitsabgleichs in `docs/radar.md`
   („Scope“): Aufmerksamkeitshilfe, keine Security-Suite.
 - **Radar nach dem Prüfgremium:** Eine Quittierung gilt nur, solange der

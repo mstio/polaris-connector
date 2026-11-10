@@ -68,6 +68,61 @@ test('HTTP 429/5xx (0.4.1): kein Auslesen der Seite, spaeter erneuter Abruf', as
   assert.deepEqual(page.takeExported(), []);
 });
 
+test('Erfolg nach Fehler wird gemeldet, auch bei unveraendertem Chat (0.4.6)', async () => {
+  const convs = { convabc: conversationJson([{ id: 'b1' }], { gizmoId: 'g-p-abc', id: 'convabc' }) };
+  const { page } = await apiPage(convs);
+  const okCount = () => page.messages.filter((m) => m.type === 'api-status' && m.status && m.status.ok).length;
+  assert.equal(page.snapshots.length, 1);
+  const okBefore = okCount();
+  await page.advance(25000);                             // unveraendert: keine weitere Meldung
+  assert.equal(okCount(), okBefore);
+  const keep = convs.convabc;
+  convs.convabc = 429;
+  await page.advance(25000);                             // Fehler gemeldet
+  const st = page.messages.filter((m) => m.type === 'api-status').map((m) => m.status);
+  assert.equal(st[st.length - 1].ok, false);
+  convs.convabc = keep;                                  // wieder da, Chat unveraendert
+  await page.advance(40000);
+  assert.equal(page.snapshots.length, 1);                // nichts erneut gesendet
+  const st2 = page.messages.filter((m) => m.type === 'api-status').map((m) => m.status);
+  assert.equal(st2[st2.length - 1].ok, true);            // aber Erfolg gemeldet
+  const okAfter = okCount();
+  await page.advance(25000);                             // danach wieder still
+  assert.equal(okCount(), okAfter);
+});
+
+test('Seitenstart: genau eine Ok-Meldung beim ersten Abruf (0.4.6)', async () => {
+  const { page } = await apiPage({ convabc: conversationJson([{ id: 'b1' }], { gizmoId: 'g-p-abc', id: 'convabc' }) });
+  const st = page.messages.filter((m) => m.type === 'api-status').map((m) => m.status && m.status.ok);
+  assert.deepEqual(st.filter((x) => x !== null && x !== undefined), [true]);
+  await page.advance(25000);                             // unveraendert: still
+  const st2 = page.messages.filter((m) => m.type === 'api-status' && m.status);
+  assert.equal(st2.length, 1);
+});
+
+test('HTTP 503 und AbortError (0.4.6): warten, nicht aus der Seite', async () => {
+  const abort = new Error('The operation was aborted.');
+  abort.name = 'AbortError';
+  for (const failure of [503, abort]) {
+    const { page } = await apiPage({ convabc: failure });
+    assert.deepEqual(page.takeExported(), [], String(failure));
+  }
+});
+
+test('Netzfehler (0.4.6): warten, nicht aus der Seite', async () => {
+  const convs = { convabc: new TypeError('NetworkError when attempting to fetch resource.') };
+  const { page } = await apiPage(convs);
+  assert.deepEqual(page.takeExported(), []);
+  convs.convabc = conversationJson([{ id: 'b1' }], { gizmoId: 'g-p-abc', id: 'convabc' });
+  await page.advance(40000);
+  assert.equal(page.snapshots.length, 1);
+});
+
+test('Sonstiger TypeError (0.4.6): Rueckfall auf die Seite statt endlos warten', async () => {
+  const { page } = await apiPage({ convabc: new TypeError("Cannot read properties of undefined (reading 'x')") });
+  assert.deepEqual(page.takeExported(), ['g-p-abc/convabc/b1', 'g-p-abc/convabc/b2']);
+});
+
 test('Schnelles Durchklicken (0.4.1): kurz besuchter Chat wird nicht abgerufen', async () => {
   const convs = {
     convabc: conversationJson([{ id: 'b1' }], { id: 'convabc' }),
