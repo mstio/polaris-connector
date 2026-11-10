@@ -15,3 +15,8 @@ security:                # Sicherheitsabgleich (Arch Security Tracker, kernel.or
   kernel_lag_warn: 4     # Warnung ab so vielen Stable-Releases Rueckstand
   kev_aliases:           # KEV-Produkt (klein) -> Paketname
     chromium v8: chromium
+  acknowledged: []       # bewertete Befunde quittieren (nur mit Zustimmung des Nutzers), z. B.:
+  # - id: kev:CVE-2026-123158          # wie in ~/.local/state/polaris/security.json
+  #   subject: "openssh 10.6p1-2"      # installierter Stand aus security.json, in Anfuehrungszeichen; nach Update ungueltig
+  #   until: 2026-12-09                # hoechstens 90 Tage voraus, danach neu bewerten
+  #   reason: nur musl ohne PAM betroffen; hier glibc, sshd aus

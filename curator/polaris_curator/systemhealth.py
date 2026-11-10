@@ -925,7 +925,9 @@ def check_security(now: datetime) -> dict:
         return _c("security", label, "warn", t("zuletzt geprüft {age} – polaris-radar", age=_fmt_age(age)))
     if state.get("error"):
         return _c("security", label, "warn", t("Abgleich unvollständig ({error}) – polaris-radar", error=state["error"]))
-    return _c("security", label, "ok", t("keine Befunde (geprüft {age})", age=_fmt_age(age)))
+    acked = state.get("acknowledged") if isinstance(state.get("acknowledged"), list) else []
+    note = t(", {n} quittiert – handoff/omarchy-radar.md", n=len(acked)) if acked else ""
+    return _c("security", label, "ok", t("keine Befunde (geprüft {age})", age=_fmt_age(age)) + note)
 
 
 def _polaris_config_value(key: str):

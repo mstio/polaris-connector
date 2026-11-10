@@ -312,6 +312,17 @@ class TestSecurity(unittest.TestCase):
         c = self._check({"checked_at": datetime.now(timezone.utc).isoformat(), "findings": []})
         self.assertEqual(c["level"], "ok")
 
+    def test_acknowledged_shown_when_ok(self):
+        c = self._check({"checked_at": datetime.now(timezone.utc).isoformat(), "findings": [],
+                         "acknowledged": [{"id": "kev:X", "until": "2099-01-01"}]})
+        self.assertEqual(c["level"], "ok")
+        self.assertIn("1 quittiert", c["detail"])
+
+    def test_acknowledged_of_wrong_type_is_ignored(self):
+        c = self._check({"checked_at": datetime.now(timezone.utc).isoformat(), "findings": [],
+                         "acknowledged": 3})
+        self.assertEqual(c["level"], "ok")
+
     def test_findings_are_warn_never_error(self):
         c = self._check({"checked_at": datetime.now(timezone.utc).isoformat(),
                          "findings": [{"id": "kev:X", "text": "aktiv ausgenutzt: X"}, {"id": "y", "text": "y"}]})

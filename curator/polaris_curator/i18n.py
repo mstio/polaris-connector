@@ -273,6 +273,8 @@ EN: dict[str, str] = {
         'check incomplete ({error}) – polaris-radar',
     'keine Befunde (geprüft {age})':
         'no findings (checked {age})',
+    ', {n} quittiert – handoff/omarchy-radar.md':
+        ', {n} acknowledged – handoff/omarchy-radar.md',
     'Abstürze':
         'Crashes',
     '{n} seit {h} h: {listed}{more} – coredumpctl list':
@@ -305,6 +307,10 @@ EN: dict[str, str] = {
         'Core dumps',
     'Chatquellen-Konfiguration':
         'Chat source configuration',
+    'ChatGPT-Schnittstelle um {local} gedrosselt oder nicht erreichbar ({error}) - die Erweiterung wiederholt den Abruf selbst; hält das an, wird nichts erfasst.':
+        'ChatGPT API throttled or unreachable at {local} ({error}) - the extension retries on its own; while this lasts, nothing is captured.',
+    'ChatGPT-Schnittstelle um {local} nicht nutzbar ({error}) - vermutlich Fehler in der Erweiterung; Erfassung dieses Chats prüfen.':
+        'ChatGPT API unusable at {local} ({error}) - probably an extension bug; check capture of this chat.',
     'ChatGPT-Schnittstelle um {local} nicht nutzbar ({error}) - Erfassung liest ersatzweise aus der Seite.':
         'ChatGPT API unusable at {local} ({error}) - capture falls back to reading the page.',
     'Falls ChatGPT hier nicht genutzt wird: in ~/.config/polaris/curator.yaml monitoring.chat_sources setzen, z. B. [claude] (siehe CHANGELOG).':

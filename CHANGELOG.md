@@ -8,6 +8,33 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Radar nach dem Prüfgremium:** Eine Quittierung gilt nur, solange der
+  Befund gleich lautet; ändert sich die Bewertung (NVD-Urteil, Rückstand,
+  Schweregrad), ist er wieder offen. Fällt eine der drei Quellen aus, zeigt
+  der Health Check „Abgleich unvollständig“ statt „keine Befunde“. Untergrenzen
+  wie „> 10.6“ schließen `10.6p1` jetzt ein.
+- **Radar: OpenSSH-Versionen richtig eingeordnet.** `10.6p2` galt bisher als
+  älter als `10.6` und blieb so nach dem Fix „betroffen“. Für openssh,
+  sudo und ntp (Positivliste) gilt jetzt die CPE-Logik, auch für die Arch-Schreibweise `1.9.17.p2`.
+- **Guard-Hook schützt `~/.config/polaris/radar.yaml`** (Quittierungen blenden
+  Sicherheitsbefunde aus). Nacharbeit bei aktivem Hook: `POLARIS_ADOPT_GUARD=1
+  install.sh --yes --only-existing` im Programmordner (übernimmt die neue
+  Hook-Fassung; macht der Nutzer).
+- **Sicherheitsbefunde quittieren:** Ein geprüfter, hier nicht zutreffender
+  Befund des Radars lässt sich in `~/.config/polaris/radar.yaml` unter
+  `security.acknowledged` quittieren (`id`, `subject` = installierter Stand,
+  `until` höchstens 90 Tage, `reason`; Beispiel in `radar.example.yaml`). Er
+  bleibt im Radar sichtbar, die Health-Check-Zeile wird grün („n quittiert“).
+  Nach einem Update des Pakets bzw. Kernels oder nach Ablauf ist er wieder da.
+- **Weniger Fehlalarm bei gedrosselter ChatGPT-Schnittstelle:** Ein
+  vorübergehender Fehler (HTTP 429, 5xx, Netz) erscheint im Health Check nur
+  noch 30 Minuten lang und mit zutreffendem Text („die Erweiterung wiederholt
+  den Abruf selbst“). Die Erweiterung liest in diesem Fall nicht aus der Seite,
+  sondern wartet und ruft erneut ab. Solange ein synchronisierter Chat offen ist,
+  erneuert jeder weitere Fehlversuch die Meldung. Andere Fehler (auch Ablehnungen
+  durch die Bridge und Programmierfehler der Erweiterung wie „TypeError: …“
+  außer Netzfehlern) bleiben wie bisher drei Stunden sichtbar.
+
 ## Zweiter Stand 2026-11-09 (Bridge, Curator, Installer; Erweiterung bleibt 0.4.5)
 
 - **Nacharbeit vor dem Update: bubblewrap installieren** (`sudo pacman -S

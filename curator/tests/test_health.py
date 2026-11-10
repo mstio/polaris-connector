@@ -169,12 +169,12 @@ class TestHealth(unittest.TestCase):
 
 
 class TestCaptureErrorFreshness(unittest.TestCase):
-    def _check(self, err_age_h, ok_age_h=None):
+    def _check(self, err_age_h, ok_age_h=None, error="Error: Antwort ohne mapping"):
         import json, tempfile
         from datetime import datetime, timedelta, timezone
         now = datetime(2026, 10, 8, 9, 0, tzinfo=timezone.utc)
         d = Path(tempfile.mkdtemp()) / "capture-status.json"
-        data = {"last_error": {"at": (now - timedelta(hours=err_age_h)).isoformat(), "error": "TypeError: NetworkError"}}
+        data = {"last_error": {"at": (now - timedelta(hours=err_age_h)).isoformat(), "error": error}}
         if ok_age_h is not None:
             data["last_ok"] = (now - timedelta(hours=ok_age_h)).isoformat()
         d.write_text(json.dumps(data))
@@ -189,6 +189,50 @@ class TestCaptureErrorFreshness(unittest.TestCase):
 
     def test_error_followed_by_success_is_fine(self):
         self.assertIsNone(self._check(1, ok_age_h=0.5))
+
+    # 2026-11-09: einzelner HTTP 429 meldete 3 h lang "liest aus der Seite",
+    # obwohl die Extension bei voruebergehenden Fehlern nur wartet.
+    def test_fresh_transient_error_says_retry_not_page(self):
+        for error in ("Error: Unterhaltung: HTTP 429", "Error: Unterhaltung: HTTP 503",
+                      "Error: Sitzung: HTTP 502",
+                      "TypeError: NetworkError when attempting to fetch resource.",
+                      "TypeError: Failed to fetch", "TypeError: network error",
+                      "TypeError: Error in body stream", "TypeError: Load failed",
+                      "AbortError: The operation was aborted."):
+            msg = self._check(0.2, ok_age_h=5, error=error)
+            self.assertIn("wiederholt den Abruf", msg, error)
+            self.assertNotIn("aus der Seite", msg, error)
+        self.assertIn("wiederholt den Abruf", self._check(0.2, error="Error: Unterhaltung: HTTP 429"))
+
+    def test_transient_error_followed_by_success_is_fine(self):
+        self.assertIsNone(self._check(0.2, ok_age_h=0.1, error="Error: Unterhaltung: HTTP 429"))
+
+    def test_not_transient_look_alikes_keep_page_text(self):
+        # Ablehnung durch die Bridge -> Extension liest aus der Seite.
+        for error in ("error: TypeError: 'NoneType' object is not subscriptable",
+                      "error: RuntimeError: upstream HTTP 503",
+                      "Error: Unterhaltung: HTTP 5031", "Error: Unterhaltung: HTTP 404",
+                      "Error: Antwort ohne mapping"):
+            self.assertIn("aus der Seite", self._check(0.2, ok_age_h=5, error=error), error)
+
+    def test_extension_type_error_is_not_transient(self):
+        # Programmierfehler der Extension, kein Netzfehler (Gremium 2026-11-10):
+        # 3 h sichtbar, ohne Aussage zum Seitenlesen (0.4.5 wartet dann nur).
+        for error in ("TypeError: Cannot read properties of undefined (reading 'mapping')",
+                      "TypeError: data is null"):
+            for age in (0.2, 1):
+                msg = self._check(age, ok_age_h=5, error=error)
+                self.assertIn("Fehler in der Erweiterung", msg, error)
+                self.assertNotIn("aus der Seite", msg, error)
+            self.assertIsNone(self._check(4, ok_age_h=5, error=error))
+
+    def test_transient_error_expires_after_30_min(self):
+        self.assertIsNone(self._check(0.6, ok_age_h=5, error="Error: Unterhaltung: HTTP 429"))
+
+    def test_non_transient_error_keeps_page_fallback_text_for_3h(self):
+        msg = self._check(2, ok_age_h=5, error="Error: Unterhaltung: HTTP 403")
+        self.assertIn("aus der Seite", msg)
+        self.assertIsNone(self._check(2, ok_age_h=1.5, error="Error: Unterhaltung: HTTP 403"))
 
 if __name__ == "__main__":
     unittest.main()

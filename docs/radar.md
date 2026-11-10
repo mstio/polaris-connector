@@ -12,7 +12,10 @@ with kernel.org stable of the same branch, and actively exploited
 vulnerabilities from [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
 with the kernel and installed packages. For package matches it checks the
 affected version ranges in the [NVD](https://nvd.nist.gov), so a package that
-is already fixed does not stay yellow. It runs once a day
+is already fixed does not stay yellow. A finding you have assessed as not
+applicable can be acknowledged for one installed state and at most 90 days
+(`security.acknowledged` in `radar.yaml`); it stays listed and comes back after
+an update or expiry. It runs once a day
 (`polaris-radar.timer`, about 3 MB) and after `omarchy update`. Details and
 switches: [`memory/README.md`](../memory/README.md).
 

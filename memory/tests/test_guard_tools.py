@@ -82,6 +82,9 @@ class TestGuardHook(unittest.TestCase):
         for tool, ti in [("Edit", {"file_path": str(self.home / ".claude" / "settings.json")}),
                          ("Write", {"file_path": str(self.home / ".config/ai-agents/tools/claude-guard-hook.py")}),
                          ("Write", {"file_path": str(self.home / ".config/polaris/config.yaml")}),
+                         ("Edit", {"file_path": str(self.home / ".config/polaris/radar.yaml")}),
+                         ("Bash", {"command": "echo x >> ~/.config/polaris/radar.yaml"}),
+                         ("Bash", {"command": "cd ~/.config/polaris && echo x >> radar.yaml"}),
                          ("Bash", {"command": "rm -rf ~/.claude/guard"}),
                          ("Bash", {"command": "sed -i s/x/y/ ~/.claude/settings.local.json"})]:
             self.assertEqual(self.hook("PreToolUse", tool, ti, level="standard"), "ask", (tool, ti))

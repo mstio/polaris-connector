@@ -16,7 +16,8 @@ Aufruf durch Claude Code mit JSON auf stdin:
   PreToolUse   -> protokolliert jede Aktion; fragt nach bei
                   * Schreibvorgaengen in Fachsystemen ueber MCP (immer),
                   * Aenderungen am Schutz selbst: ~/.claude/settings*,
-                    ~/.claude/guard, claude-guard-*, ~/.config/polaris/config.yaml (immer),
+                    ~/.claude/guard, claude-guard-*, ~/.config/polaris/config.yaml,
+                    ~/.config/polaris/radar.yaml (Quittierungen) (immer),
                   * nach Fremdinhalt: Bash, Schreiben, MCP, WebFetch, WebSearch,
                     Monitor, Artifact, SendMessage - Stufe "streng"
 Stufe ueber CLAUDE_GUARD_LEVEL=standard|streng (Standard: streng).
@@ -54,7 +55,9 @@ ALWAYS_ASK_ACTIONS = re.compile(
     r"(senden|send|antworten|schreiben|anlegen|loeschen|löschen|aendern|ändern|erstellen|update)", re.I)
 
 # Immer nachfragen: Aenderungen am Schutz selbst.
-PROTECTED = (".claude/settings", ".claude/guard", "claude-guard", ".config/polaris/config.yaml")
+# radar.yaml seit 2026-11-09: security.acknowledged blendet Sicherheitsbefunde aus.
+PROTECTED = (".claude/settings", ".claude/guard", "claude-guard", ".config/polaris/config.yaml",
+             ".config/polaris/radar.yaml")
 DESTRUCTIVE = re.compile(r"\b(rm|mv|chmod|chattr|ln|truncate|rsync|find)\b")
 
 # Nach Fremdinhalt nachfragen (Stufe "streng"): alles, was Folgen haben oder ausleiten kann.
@@ -171,6 +174,7 @@ def _touches_protection(tool: str, ti: dict) -> bool:
     if tool in ("Bash", "Monitor"):
         cmd = str(ti.get("command") or "")
         return (any(p in cmd for p in PROTECTED) or (".claude" in cmd and "settings" in cmd)
+                or ("polaris" in cmd and ("radar.yaml" in cmd or "config.yaml" in cmd))
                 or (".claude" in cmd and bool(DESTRUCTIVE.search(cmd))))
     return False
 

@@ -19,6 +19,9 @@ und PyYAML) und schreibt eine kurze Uebersicht ins Maschinengedaechtnis
     Liegt die installierte Version ausserhalb aller Bereiche, ist es kein
     Befund mehr. Ohne Versionsangaben in der NVD bleibt die Warnung.
     Ergebnis zusaetzlich in ~/.local/state/polaris/security.json (Health Check).
+    Quittieren (seit 2026-11-09): bewertete Befunde unter security.acknowledged
+    (id, subject = installierter Stand, until <= 90 Tage, reason); gilt nur
+    fuer genau diesen Stand, bleibt sichtbar, laeuft ab (apply_acks).
 
 Kein Dauerprozess: laeuft auf Anfrage, nach `omarchy update`
 (Hook `~/.config/omarchy/hooks/post-update.d/polaris-radar.hook`) und
@@ -31,7 +34,8 @@ Konfiguration (optional): ~/.config/polaris/radar.yaml
   watch_issues: [owner/repo#12]
   watch_repos: [owner/repo]
   days: 14
-  security: {enabled: true, days: 30, kernel_lag_warn: 4, kev_aliases: {chromium v8: chromium}}
+  security: {enabled: true, days: 30, kernel_lag_warn: 4, kev_aliases: {chromium v8: chromium},
+             acknowledged: [{id: kev:CVE-…, subject: "openssh 10.6p1-2", until: 2026-12-09, reason: …}]}
 
 Aufruf:  polaris-radar [--days N] [--stdout] [--notify] [--quiet]
 Exit:    0 = geschrieben, 75 = keine Quelle erreichbar (Datei unveraendert)
@@ -72,6 +76,7 @@ KEV_ALIASES = {"chromium v8": "chromium"}
 NVD = os.environ.get("POLARIS_RADAR_NVD", "https://services.nvd.nist.gov/rest/json/cves/2.0")
 NVD_MAX_AGE = dt.timedelta(days=3)
 NVD_MAX_FETCH = 5      # ohne API-Schluessel erlaubt die NVD 5 Abfragen je 30 s
+ACK_MAX_DAYS = 90      # Quittierungen gelten hoechstens so lange, dann neu bewerten
 MAX_PAGES = 4          # je Quelle hoechstens 400 Commits
 LIST_LIMIT = 15        # Eintraege je Abschnitt (Handoff-Richtgroesse)
 
@@ -322,24 +327,80 @@ class NvdCache:
             pass
 
 
-def nvd_verdict(matches: list[dict], products: set[tuple[str, str]], installed: str) -> tuple[str, str] | None:
+P_RELEASE_PKGS = {"openssh", "sudo", "ntp"}   # "pN" = Nachtrag (portable release); nur diese (Positivliste)
+_PREL_RE = re.compile(r"^(.*\d)[._]?[pP](\d+)$")
+
+
+def split_p(ver: str) -> tuple[str, int | None]:
+    """10.6p1 / 1.9.17.p2 -> (Basisversion, N); sonst (ver, None)."""
+    m = _PREL_RE.match(ver)
+    return (m[1], int(m[2])) if m else (ver, None)
+
+
+def nvd_verdict(matches: list[dict], products: set[tuple[str, str]], installed: str,
+                pkg: str = "") -> tuple[str, str] | None:
     """("betroffen"|"nicht betroffen", Erklaerung) fuer die installierte Version;
-    None, wenn die NVD fuer das Produkt keine auswertbaren Versionsangaben hat."""
+    None, wenn die NVD fuer das Produkt keine auswertbaren Versionsangaben hat.
+
+    OpenSSH-artige Nachtraege (seit 2026-11-09): vercmp liest 10.6p2 als aelter
+    als 10.6 (Buchstabe = Vorabversion). Ist "pN" belegt (Paket in
+    P_RELEASE_PKGS), gilt die CPE-Logik: Grenzen ohne pN
+    vergleichen nur die Basisversion (<10.6 schliesst 10.6p2 aus, <=10.6 schliesst
+    10.6p1 ein), Grenzen mit pN zusaetzlich die Nummer; Einzelangaben mit
+    Update-Feld pN (cpe ...:10.6:p1) treffen diesen Nachtrag (und eine Version
+    ohne Nachtrag im Paketnamen), "-" nur die
+    Version ohne Nachtrag, "*" und alles Unbekannte (rc1, sp1, ga) im Zweifel
+    jeden Stand der Basisversion. Andere Pakete: reines vercmp wie bisher."""
     ver = upstream_version(installed)
     rel = [m for m in matches if len(m["criteria"].split(":")) > 5
            and (cpe_name(m["criteria"].split(":")[3]), cpe_name(m["criteria"].split(":")[4])) in products]
     if not rel:
         return None
+
+    def update_of(m: dict) -> str:
+        parts = m["criteria"].split(":")
+        return parts[6] if len(parts) > 6 else "*"
+
+    # Nur die Positivliste: Zaehlt ein anderes Projekt "pN" als Vorabversion, waere die
+    # Nachtrags-Logik die gefaehrliche Richtung (falsches "nicht betroffen", Fable R2).
+    psem = pkg in P_RELEASE_PKGS
+    base, post = split_p(ver) if psem else (ver, None)
+
+    def cmp_bound(bound: str, lower: bool) -> int | None:
+        bbase, bpost = split_p(bound) if psem else (bound, None)
+        c = vcmp(base, bbase)
+        if c is None or c != 0:
+            return c
+        if bpost is None:
+            # Grenze ohne pN: Obergrenze vergleicht nur die Basisversion (<10.6 schliesst
+            # 10.6p2 aus, <=10.6 schliesst 10.6p1 ein); Untergrenze wertet den Nachtrag als
+            # spaeter (>10.6 schliesst 10.6p1 ein) - beides die vorsichtige Richtung.
+            return 1 if lower and post is not None else 0
+        n = post or 0
+        return (n > bpost) - (n < bpost)
+
     fixes = []
     for m in rel:
-        exact = m["criteria"].split(":")[5]
+        exact, update = m["criteria"].split(":")[5], update_of(m)
         bounds = {k: v for k, v in m.items() if k.startswith("version")}
         if exact not in ("*", "-"):
-            c = vcmp(ver, exact)
+            xbase, xpost = split_p(exact) if psem else (exact, None)
+            if psem and re.fullmatch(r"[pP]\d+", update):
+                xpost = int(update[1:])
+            c = vcmp(base, xbase)
             if c is None:
                 return None
-            if c == 0:
-                return "betroffen", f"Version {token(exact)} gelistet"
+            if c != 0:
+                continue
+            if xpost is not None:
+                hit = post is None or post == xpost      # Nachtrag fehlt im Paketnamen: im Zweifel betroffen
+            elif psem and update == "-":
+                hit = post is None
+            else:
+                hit = True               # Update "*" oder unbekannt: im Zweifel betroffen
+            if hit:
+                shown = token(exact) + ("" if update in ("*", "-", "") else token(update))
+                return "betroffen", f"Version {shown} gelistet"
             continue
         if not bounds:
             return None                      # ohne Bereich nicht entscheidbar
@@ -348,7 +409,7 @@ def nvd_verdict(matches: list[dict], products: set[tuple[str, str]], installed: 
         inside = True
         for key, ok in checks:
             if key in bounds:
-                c = vcmp(ver, bounds[key])
+                c = cmp_bound(str(bounds[key]), key.startswith("versionStart"))
                 if c is None:
                     return None
                 inside = inside and ok(c)
@@ -362,13 +423,105 @@ def nvd_verdict(matches: list[dict], products: set[tuple[str, str]], installed: 
     return "nicht betroffen", f"{ver} liegt außerhalb der betroffenen Bereiche{fix}"
 
 
+_SUBJECT_RE = re.compile(r"^[A-Za-z0-9._:+~@ -]{1,80}$")
+
+
+def _ack_date(value) -> dt.date | None:
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    try:
+        return dt.date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def apply_acks(finds: list[dict], acks, today: dt.date, complete: bool = True,
+               basis: dict | None = None) -> tuple[list[dict], list[dict], list[str]]:
+    """Bewertete Befunde quittieren (Konfiguration security.acknowledged).
+
+    Eine Quittierung gilt nur fuer genau einen Befund (id) und genau den
+    installierten Stand (subject, z. B. "openssh 10.6p1-2" oder die
+    Kernel-Version), braucht einen Grund und laeuft nach hoechstens
+    ACK_MAX_DAYS Tagen ab. Aendert sich der Stand oder laeuft sie ab, ist der
+    Befund wieder da. Quittiertes bleibt im Handoff sichtbar.
+    Grenze: Der Inhalt des Befunds (z. B. NVD-Urteil, Kernel-Rueckstand) ist
+    nicht Teil der Bindung; innerhalb von Stand und Frist bleibt er quittiert.
+    complete=False (eine Quelle fehlte): kein Hinweis auf verwaiste Eintraege.
+    basis (seit 2026-11-10, Gremium): Text des Befunds beim ersten Quittieren je
+    (id, subject, until), in security.json "ack_basis" fortgeschrieben. Aendert
+    sich der Text (z. B. NVD-Urteil, Kernel-Rueckstand, Schweregrad), ist der
+    Befund wieder offen, bis eine neue Quittierung (anderes until) ihn bestaetigt.
+    Das Woerterbuch wird an Ort und Stelle auf die gueltigen Eintraege gekuerzt.
+    Rueckgabe: (offene Befunde, quittierte Befunde, Zeilen)."""
+    basis = {} if basis is None else basis
+    notes: list[str] = []
+    valid: dict[str, dict] = {}
+    if acks is not None and not isinstance(acks, list):
+        notes.append("- Quittierung ungültig: security.acknowledged muss eine Liste sein (Einträge mit „- id: …“).")
+        acks = []
+    for a in acks or []:
+        if not isinstance(a, dict):
+            notes.append(f"- Quittierung ungültig ({clean(a, 60)}): Eintrag braucht id, subject, until, reason.")
+            continue
+        aid = token(a.get("id"))
+        until = _ack_date(a.get("until"))
+        subject = str(a.get("subject") or "").strip()
+        reason = re.sub(r"\s+", " ", str(a.get("reason") or "")).strip()
+        why = ("id fehlt" if aid == "?" else
+               "subject fehlt (installierter Stand, z. B. \"openssh 10.6p1-2\")" if not _SUBJECT_RE.match(subject) else
+               "reason fehlt" if not reason else
+               "until fehlt oder ist kein Datum" if until is None else
+               f"until liegt mehr als {ACK_MAX_DAYS} Tage voraus" if until > today + dt.timedelta(days=ACK_MAX_DAYS) else
+               None)
+        if why:
+            notes.append(f"- Quittierung ungültig für {aid}: {why}.")
+            continue
+        entry = {"id": aid, "subject": subject, "until": until.isoformat(),
+                 "reason": clean(reason, 160)[1:-1], "expired": until < today}
+        old = valid.get(aid)
+        if old:
+            notes.append(f"- Quittierung für {aid} mehrfach eingetragen – es gilt die mit dem spätesten until.")
+            if old["until"] >= entry["until"]:      # ISO-Daten: Textvergleich = Datumsvergleich
+                continue
+        valid[aid] = entry
+    kept, acked, used = [], [], set()
+    for f in finds:
+        a = valid.get(f["id"])
+        if not a:
+            kept.append(f)
+            continue
+        used.add(a["id"])
+        if a["subject"] != f.get("subject"):
+            kept.append({**f, "text": f"{f['text']} (Quittierung gilt für {a['subject']}, "
+                                      f"installiert {f.get('subject') or '?'}: neu bewerten)"})
+        elif a["expired"]:
+            kept.append({**f, "text": f"{f['text']} (Quittierung abgelaufen {a['until']}: neu bewerten)"})
+        elif basis.setdefault(f"{a['id']}|{a['subject']}|{a['until']}", f["text"]) != f["text"]:
+            kept.append({**f, "text": f"{f['text']} (Befund hat sich seit der Quittierung geändert: "
+                                      "neu bewerten, bei Bedarf neu quittieren)"})
+        else:
+            acked.append({**f, "until": a["until"], "reason": a["reason"]})
+            notes.append(f"- quittiert bis {a['until']}: {f['text']} – Grund: `{a['reason']}`")
+    live = {f"{a['id']}|{a['subject']}|{a['until']}" for a in valid.values() if not a["expired"]}
+    for k in [k for k in basis if k not in live]:
+        del basis[k]
+    for aid, a in valid.items():
+        if complete and aid not in used and not a["expired"]:
+            notes.append(f"- Quittierung für {aid}: derzeit kein Befund (behoben oder außerhalb des Zeitraums) – "
+                         "Eintrag kann aus radar.yaml entfernt werden.")
+    return kept, acked, notes
+
+
 def kernel_version(release: str) -> tuple[int, ...] | None:
     m = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", release)
     return (int(m[1]), int(m[2]), int(m[3] or 0)) if m else None
 
 
-def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
-    """Abschnitt Sicherheit: (Zeilen, Befunde). Befund = {id, level, text}.
+def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict], list[dict], dict, str | None]:
+    """Abschnitt Sicherheit: (Zeilen, offene Befunde, quittierte Befunde).
+    Befund = {id, level, subject, text}; subject = installierter Stand.
     Arch-Tracker-Eintraege ohne Fix werden nur gezaehlt: viele sind seit Jahren
     nicht gepflegt (z. B. linux 5.15) und waeren Dauerrauschen."""
     days = int(cfg.get("days") or 30)
@@ -393,7 +546,7 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
                     continue
                 if g.get("fixed") and older(pkgs[p], g["fixed"]):
                     cves = ", ".join(token(c) for c in (g.get("issues") or [])[:3])
-                    finds.append({"id": f"{token(g['name'])}:{p}", "level": "warn",
+                    finds.append({"id": f"{token(g['name'])}:{p}", "level": "warn", "subject": f"{p} {pkgs[p]}",
                                   "text": f"{p} {pkgs[p]} → Fix in {token(g['fixed'])} ({token(g['name'])}, "
                                           f"{token(g.get('severity'))}, {phrase(g.get('type'))}; {cves}) – Update einspielen"})
                 elif not g.get("fixed") and g.get("status") == "Vulnerable":
@@ -412,7 +565,7 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
             branch = [r for r in rel if r.get("moniker") in ("stable", "longterm")
                       and kernel_version(r.get("version", "")) and kernel_version(r["version"])[:2] == rv[:2]]
             if not branch:
-                finds.append({"id": f"kernel-eol:{rv[0]}.{rv[1]}", "level": "warn",
+                finds.append({"id": f"kernel-eol:{rv[0]}.{rv[1]}", "level": "warn", "subject": running,
                               "text": f"Kernel {running}: Zweig {rv[0]}.{rv[1]} wird upstream nicht mehr gepflegt"})
             else:
                 up = branch[0]
@@ -420,7 +573,7 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
                 when = (up.get("released") or {}).get("isodate", "?")
                 text = f"Kernel {running} läuft, Upstream-Stable {token(up['version'])} ({token(when)}): {max(lag, 0)} Releases Rückstand"
                 if lag >= lag_warn:
-                    finds.append({"id": f"kernel-lag:{running}", "level": "warn",
+                    finds.append({"id": f"kernel-lag:{running}", "level": "warn", "subject": running,
                                   "text": text + f" (Grenze {lag_warn}) – Kernel-Update abwarten/prüfen"})
                 else:
                     kernel_current = lag <= 0
@@ -448,14 +601,15 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
                     lines.append(f"- {cve} (aktiv ausgenutzt, Kernel): laufender Kernel ist aktuellster Stable-Stand, "
                                  "vermutlich behoben.")
                     continue
-                hit = f"Kernel {running}"
+                hit, subject = f"Kernel {running}", running
             elif prod in names or prod.replace(" ", "-") in names:
                 pkg = prod if prod in names else prod.replace(" ", "-")
                 hit = f"Paket {pkg}"
                 installed = next((ver for name, ver in pkgs.items() if name.lower() == pkg), None)
+                subject = f"{pkg} {installed}"
                 matches = nvd.matches(cve) if installed else None
                 verdict = nvd_verdict(matches, {(cpe_name(vend), cpe_name(raw_prod)), (cpe_name(vend), cpe_name(prod))},
-                                      installed) if matches else None
+                                      installed, pkg) if matches else None
                 if verdict and verdict[0] == "nicht betroffen":
                     lines.append(f"- {cve} (aktiv ausgenutzt, {pkg} {installed}): laut NVD nicht betroffen – {verdict[1]}.")
                     continue
@@ -463,7 +617,7 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
                     hit += f" {installed} (laut NVD betroffen: {verdict[1]})"
             else:
                 continue
-            finds.append({"id": f"kev:{cve}", "level": "warn",
+            finds.append({"id": f"kev:{cve}", "level": "warn", "subject": subject,
                           "text": f"aktiv ausgenutzt: {cve} ({token(v.get('dateAdded'))}) betrifft {hit} – "
                                   f"{clean(v.get('vulnerabilityName'), 90)}; Fix-Stand prüfen"})
         lines.append(f"- CISA KEV: aktiv ausgenutzte Lücken der letzten {days} Tage gegen Kernel und installierte Pakete "
@@ -474,13 +628,28 @@ def security(cfg: dict, now: dt.datetime) -> tuple[list[str], list[dict]]:
     nvd.save()
     if errs and len(errs) == 3:
         raise Unreachable("; ".join(errs))
-    out = [f"- **{f['text']}**" for f in finds] + lines
+    basis = load_ack_basis()
+    finds, acked, ack_lines = apply_acks(finds, cfg.get("acknowledged"), now.astimezone().date(),
+                                         complete=not errs, basis=basis)
+    out = [f"- **{f['text']}**" for f in finds] + ack_lines + lines
     out += [f"- nicht erreichbar: {clean(e, 160)}" for e in errs]
-    return out, finds
+    # Teilausfall nicht als "keine Befunde" ausgeben (Gremium Codex): Fehler in security.json.
+    return out, finds, acked, basis, "; ".join(clean(e, 160)[1:-1] for e in errs) or None
 
 
-def write_security_state(now: dt.datetime, finds: list[dict] | None, error: str | None) -> None:
-    state = {"checked_at": now.isoformat(), "findings": finds or [], "error": error}
+def load_ack_basis() -> dict:
+    """ack_basis aus der letzten security.json (siehe apply_acks)."""
+    try:
+        prev = json.loads(SEC_STATE.read_text(encoding="utf-8")).get("ack_basis")
+    except (OSError, ValueError, AttributeError):
+        prev = None
+    return {str(k): str(v) for k, v in prev.items()} if isinstance(prev, dict) else {}
+
+
+def write_security_state(now: dt.datetime, finds: list[dict] | None, error: str | None,
+                         acked: list[dict] | None = None, basis: dict | None = None) -> None:
+    state = {"checked_at": now.isoformat(), "findings": finds or [], "acknowledged": acked or [],
+             "ack_basis": basis or {}, "error": error}
     SEC_STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = SEC_STATE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -554,12 +723,16 @@ def main() -> int:
 
     sec_cfg = cfg.get("security") if isinstance(cfg.get("security"), dict) else {}
     sec_finds: list[dict] | None = None
+    sec_acked: list[dict] = []
+    sec_basis: dict = {}
+    sec_error: str | None = None
     if sec_cfg.get("enabled", True):
         try:
-            parts["security"], sec_finds = security(sec_cfg, now)
+            parts["security"], sec_finds, sec_acked, sec_basis, sec_error = security(sec_cfg, now)
         except Unreachable as e:
             errors.append(str(e))
             parts["security"] = None
+            sec_basis = load_ack_basis()     # ohne Quellen nichts verwerfen (Fable K1)
 
     if errors and not REACHED:
         print("polaris-radar: keine Quelle erreichbar, nichts geschrieben", file=sys.stderr)
@@ -596,7 +769,8 @@ def main() -> int:
         return 0
 
     if "security" in parts:
-        write_security_state(now, sec_finds, None if sec_finds is not None else "Quellen nicht erreichbar")
+        write_security_state(now, sec_finds, sec_error if sec_finds is not None else "Quellen nicht erreichbar",
+                             sec_acked, sec_basis)
 
     target = MEMORY / "handoff" / "omarchy-radar.md"
     if not target.parent.is_dir():
@@ -615,7 +789,9 @@ def main() -> int:
     sec_new = [f for f in (sec_finds or []) if f["id"] not in seen]
     found += [f["id"] for f in sec_finds or []]
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps({"last_run": now.isoformat(), "seen": sorted(seen | set(found))[-2000:]}), encoding="utf-8")
+    # Quittiertes vergessen: Kommt der Befund nach Ablauf oder Update zurueck, meldet er sich neu.
+    seen = (seen | set(found)) - {f["id"] for f in sec_acked}
+    STATE.write_text(json.dumps({"last_run": now.isoformat(), "seen": sorted(seen)[-2000:]}), encoding="utf-8")
 
     if a.notify and sec_new and not os.environ.get("POLARIS_NO_NOTIFY"):
         # notify-send deutet Pango-Markup: Fremdtext maskieren.

@@ -128,6 +128,30 @@ def _held_back(now: datetime) -> list[str]:
 
 
 CAPTURE_ERROR_FRESH = timedelta(hours=3)
+# Voruebergehende Fehler (429, 5xx, Netz) behandelt die Extension seit 0.4.1
+# selbst: sie wartet (30 s, verdoppelnd bis 10 min) und ruft erneut ab, ohne
+# aus der Seite zu lesen (extension/content.js, isTransientApiError). Jeder
+# weitere Fehlversuch erneuert den Zeitstempel, ein anhaltender Ausfall bleibt
+# also sichtbar, solange ein synchronisierter Chat offen ist. Ein einzelner 429
+# meldete sonst 3 h lang faelschlich "liest ersatzweise aus der Seite"
+# (2026-11-09): Erfolg meldet die Extension nur nach einem geaenderten Chat.
+# Am Anfang verankert (Zweitpruefung 2026-11-09): nur die Form der Abruffehler
+# (chatgpt_api.js bzw. fetch selbst). Lehnt die Bridge ein Abbild ab
+# ("error: TypeError: ..."), liest die Extension sehr wohl aus der Seite.
+# Nur Netzfehler von fetch zaehlen als voruebergehend, nicht jeder TypeError
+# (Gremium 2026-11-10): ein Programmierfehler der Extension ("TypeError:
+# Cannot read properties of undefined") soll 3 h sichtbar bleiben. Die
+# Extension 0.4.5 wertet noch jeden TypeError als voruebergehend; das naechste
+# Release zieht content.js (isTransientApiError) nach.
+# Offen: Beginn einer Fehlerserie kennt die Statusdatei nicht (native_host.py).
+CAPTURE_TRANSIENT_FRESH = timedelta(minutes=30)
+_TRANSIENT_ERROR = re.compile(
+    r"^(?:Error: (?:Unterhaltung|Sitzung): HTTP (?:429|5\d\d)\b"
+    r"|TypeError: (?:NetworkError|Failed to fetch|network error|Error in body stream|Load failed)"
+    r"|AbortError\b)")
+# Sonstiger TypeError: vermutlich Programmierfehler der Extension. 0.4.5
+# wartet dann und liest nicht aus der Seite; deshalb neutraler Text.
+_EXTENSION_ERROR = re.compile(r"^TypeError: ")
 
 
 def _capture_problem(now: datetime) -> str | None:
@@ -153,10 +177,23 @@ def _capture_problem(now: datetime) -> str | None:
     # spaeteren Versuch (z. B. kurzer Netzaussetzer, danach nur unveraenderte
     # oder nicht zugeordnete Chats) loeste sonst noch Stunden spaeter eine
     # Desktop-Meldung aus.
-    if (ok_at is None or ok_at < err_at) and now - err_at < CAPTURE_ERROR_FRESH:
-        local = err_at.astimezone().strftime("%H:%M")
+    if ok_at is not None and ok_at >= err_at:
+        return None
+    error = str(err.get("error", ""))[:100]
+    local = err_at.astimezone().strftime("%H:%M")
+    if _TRANSIENT_ERROR.search(error):
+        if now - err_at < CAPTURE_TRANSIENT_FRESH:
+            return t("ChatGPT-Schnittstelle um {local} gedrosselt oder nicht erreichbar ({error}) - "
+                     "die Erweiterung wiederholt den Abruf selbst; hält das an, wird nichts erfasst.",
+                     local=local, error=error)
+        return None
+    if now - err_at < CAPTURE_ERROR_FRESH:
+        if _EXTENSION_ERROR.search(error):
+            return t("ChatGPT-Schnittstelle um {local} nicht nutzbar ({error}) - "
+                     "vermutlich Fehler in der Erweiterung; Erfassung dieses Chats prüfen.",
+                     local=local, error=error)
         return t("ChatGPT-Schnittstelle um {local} nicht nutzbar ({error}) - "
-                 "Erfassung liest ersatzweise aus der Seite.", local=local, error=err.get("error", "")[:100])
+                 "Erfassung liest ersatzweise aus der Seite.", local=local, error=error)
     return None
 
 
