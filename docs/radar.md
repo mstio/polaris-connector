@@ -19,6 +19,20 @@ an update or expiry. It runs once a day
 (`polaris-radar.timer`, about 3 MB) and after `omarchy update`. Details and
 switches: [`memory/README.md`](../memory/README.md).
 
+## Scope
+
+The security check is an attention aid for a single desktop, not a security
+suite. It points out what deserves a look, helps to assess it and, for a
+serious hole before a fix arrives, to find a mitigation. Most holes close with
+the next regular update. False alarms are as harmful as missed ones, because
+yellow lines that never need action get ignored; therefore a finding that has
+been assessed can be acknowledged, and unclear cases stay yellow rather than
+red. Deliberately out of scope: protection against local tampering (anyone who
+can write to the home directory can silence the check; only `radar.yaml` is
+covered by the optional guard hook), complete coverage of all packages,
+distribution backports, and professional vulnerability management. Changes
+should keep this balance: stricter rules only where a real case was missed.
+
 ---
 
 [Back to the README](../README.md)

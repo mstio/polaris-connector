@@ -8,6 +8,8 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- Doku: Zweck und bewusste Grenzen des Sicherheitsabgleichs in `docs/radar.md`
+  („Scope“): Aufmerksamkeitshilfe, keine Security-Suite.
 - **Radar nach dem Prüfgremium:** Eine Quittierung gilt nur, solange der
   Befund gleich lautet; ändert sich die Bewertung (NVD-Urteil, Rückstand,
   Schweregrad), ist er wieder offen. Fällt eine der drei Quellen aus, zeigt

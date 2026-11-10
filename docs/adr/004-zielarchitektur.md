@@ -66,6 +66,10 @@ Keine neuen Ordner. Drei Verträge in `docs/contracts.md`, jeder mit Test:
    `{schema, module, status ∈ {ok,warn,error,unknown}, checked_at, stale_after, detail}`;
    `detail` ist nur Anzeige-Text, nie Befehl. Health wertet `checked_at + stale_after`
    (veraltet = `warn`). Bestehende Dateien bleiben, wo sie sind; kein `health.d`.
+   Nachtrag 2026-11-10: `security.json` (Radar) trägt inzwischen eigene Felder
+   (`findings`, `acknowledged`, `ack_basis`, `error`), die `systemhealth.py` selbst
+   auswertet. Bei diesem Schritt meldet der Radar `status` und `detail` (z. B. „ok,
+   1 quittiert“) selbst; die übrigen Felder bleiben Radar-intern.
 
 Dazu: Curator veröffentlicht, was die Bridge braucht, als Vertragsdatei (statt dass die Bridge
 `curator-state.json` liest). `~/.config/polaris/modules.conf` aus ADR 002, Stufe 1, ersetzt das
