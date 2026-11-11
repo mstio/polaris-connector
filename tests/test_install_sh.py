@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -44,6 +45,8 @@ class InstallShTest(unittest.TestCase):
         (stub / "omarchy").write_text(OMARCHY_STUB)
         for name in ("systemctl", "omarchy-shell"):
             (stub / name).write_text("#!/bin/sh\nexit 0\n")
+        (stub / "omarchy-default-agent").write_text(
+            '#!/bin/sh\ncat "$HOME/.config/omarchy/defaults/agent" 2>/dev/null || true\n')
         for f in stub.iterdir():
             f.chmod(0o755)
         self.base = base
@@ -70,9 +73,23 @@ class InstallShTest(unittest.TestCase):
     def test_fresh_install_adds_companion_widgets(self):
         r = self.install(*BASE_ARGS, "--projects", str(self.home / "Projekte"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(yaml.safe_load((self.home / ".config/polaris/curator.yaml").read_text())["runtime"],
+                         "default")
         for pid in ("mst.polaris-curator", "mst.agent-launchers", "omadock"):
             self.assertTrue((self.plugins / pid).is_dir(), pid)
             self.assertIn(pid, self.enabled())
+
+    def test_default_curator_agent_is_checked_during_install(self):
+        selected = self.home / ".config/omarchy/defaults/agent"
+        selected.parent.mkdir(parents=True)
+        selected.write_text("claude\n")
+        stub = Path(self.env["PATH"].split(":", 1)[0])
+        (stub / "claude").write_text("#!/bin/sh\nexit 0\n")
+        (stub / "claude").chmod(0o755)
+        r = self.install(*BASE_ARGS)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("Kein von Polaris unterstützter Omarchy-Standardagent", r.stdout)
+        self.assertNotIn("ist nicht installiert", r.stdout)
 
     def test_existing_disabled_plugin_gets_enabled(self):
         (self.plugins / "omadock" / ".git").mkdir(parents=True)   # geklont, nie aktiviert
@@ -223,6 +240,39 @@ class InstallShTest(unittest.TestCase):
     def test_invalid_language_rejected(self):
         r = self.install(*BASE_ARGS, "--language", "fr")
         self.assertEqual(r.returncode, 2)
+
+
+    # Vertrauensanker fuer polaris update (seit 2026-11-11, nach dem Vorschlag eines Nutzers)
+    def test_trust_anchor_created_from_repo(self):
+        r = self.install(*BASE_ARGS)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        anchor = self.home / ".config/polaris/allowed_signers"
+        self.assertEqual(anchor.read_text(), (REPO / "keys/allowed_signers").read_text())
+        self.assertIn("SHA256:", r.stdout)
+
+    def test_trust_anchor_never_replaced(self):
+        anchor = self.home / ".config/polaris/allowed_signers"
+        anchor.parent.mkdir(parents=True)
+        anchor.write_text("eigener Anker\n")
+        r = self.install(*BASE_ARGS, "--only-existing")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(anchor.read_text(), "eigener Anker\n")
+        self.assertIn("NICHT ersetzt", r.stdout)
+
+    def test_empty_trust_anchor_is_filled(self):
+        # Fable 2026-11-11: leerer Anker war eine Sackgasse (update.sh: "fehlt",
+        # install.sh: "weicht ab").
+        anchor = self.home / ".config/polaris/allowed_signers"
+        anchor.parent.mkdir(parents=True)
+        anchor.write_text("")
+        r = self.install(*BASE_ARGS)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(anchor.read_text(), (REPO / "keys/allowed_signers").read_text())
+
+    def test_repo_anchor_matches_documented_fingerprint(self):
+        out = subprocess.run(["ssh-keygen", "-lf", "-"], input=" ".join(
+            (REPO / "keys/allowed_signers").read_text().split()[2:4]), capture_output=True, text=True).stdout
+        self.assertIn(out.split()[1], (REPO / "docs/install.md").read_text())
 
 
 if __name__ == "__main__":

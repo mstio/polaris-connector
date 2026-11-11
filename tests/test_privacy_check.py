@@ -35,6 +35,20 @@ class PrivacyCheckTest(unittest.TestCase):
                     "GIT_CONFIG_NOSYSTEM": "1"}
         self.tree = Path(self._tmp.name) / "tree"
         self.tree.mkdir()
+        # Signierschluessel und Vertrauensanker (seit 2026-11-11): der Hook
+        # laesst nur signierte Spitzen durch.
+        self.key = Path(self._tmp.name) / "release"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", str(self.key)],
+                       check=True, env=self.env)
+        pub = " ".join(Path(f"{self.key}.pub").read_text().split()[:2])
+        (cfg / "allowed_signers").write_text(f'polaris-release namespaces="git" {pub}\n')
+
+    def sign_in(self, clone: Path):
+        for k, v in (("gpg.format", "ssh"), ("user.signingkey", str(self.key)), ("commit.gpgsign", "true")):
+            subprocess.run(["git", "-C", str(clone), "config", k, v], check=True, env=self.env)
+        # Jeder veroeffentlichte Stand traegt keys/allowed_signers = Anker (Gremium Codex 2026-11-11).
+        (clone / "keys").mkdir(exist_ok=True)
+        (clone / "keys" / "allowed_signers").write_text((self.cfg / "allowed_signers").read_text())
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -180,6 +194,7 @@ class PrivacyCheckTest(unittest.TestCase):
         git("init", "-q", "-b", "main", str(clone))
         git("remote", "add", "origin", str(remote), cwd=clone)
         (clone / ".git" / "hooks" / "pre-push").symlink_to(HOOK)
+        self.sign_in(clone)
         ident = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
         (clone / "ok.md").write_text("harmlos\n")
         git("add", "-A", cwd=clone)
@@ -203,6 +218,7 @@ class PrivacyCheckTest(unittest.TestCase):
         git("init", "-q", "-b", "main", str(clone))
         git("remote", "add", "origin", str(remote), cwd=clone)
         (clone / ".git" / "hooks" / "pre-push").symlink_to(HOOK)
+        self.sign_in(clone)
         (clone / "ok.md").write_text("harmlos\n")
         git("add", "-A", cwd=clone)
         git("-c", "user.name=Test", "-c", "user.email=chef@geheimfirma.example", "commit", "-qm", "ok", cwd=clone)
@@ -210,6 +226,72 @@ class PrivacyCheckTest(unittest.TestCase):
                            capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("Autor/Nachricht", r.stderr)
+
+    def test_pre_push_hook_refuses_unsigned_tip(self):
+        base = Path(self._tmp.name)
+        remote, clone = base / "remote.git", base / "clone"
+        git = lambda *a, cwd=None: subprocess.run(["git", *a], cwd=cwd, env=self.env, check=True,
+                                                   capture_output=True, text=True)
+        git("init", "-q", "--bare", str(remote))
+        git("init", "-q", "-b", "main", str(clone))
+        git("remote", "add", "origin", str(remote), cwd=clone)
+        (clone / ".git" / "hooks" / "pre-push").symlink_to(HOOK)
+        (clone / "ok.md").write_text("harmlos\n")
+        git("add", "-A", cwd=clone)
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "ok", cwd=clone)
+        r = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=clone, env=self.env,
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("nicht signiert", r.stderr)
+
+    def test_pre_push_hook_refuses_foreign_key_and_anchor_change(self):
+        base = Path(self._tmp.name)
+        remote, clone = base / "remote.git", base / "clone"
+        git = lambda *a, cwd=None: subprocess.run(["git", *a], cwd=cwd, env=self.env, check=True,
+                                                   capture_output=True, text=True)
+        git("init", "-q", "--bare", str(remote))
+        git("init", "-q", "-b", "main", str(clone))
+        git("remote", "add", "origin", str(remote), cwd=clone)
+        (clone / ".git" / "hooks" / "pre-push").symlink_to(HOOK)
+        self.sign_in(clone)
+        # 1) mit dem richtigen Schluessel, aber anderer keys/allowed_signers
+        (clone / "keys" / "allowed_signers").write_text("anders\n")
+        git("add", "-A", cwd=clone)
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "k", cwd=clone)
+        r = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=clone, env=self.env,
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("weicht", r.stderr)
+        # 2) passender Anker, aber fremder Schluessel
+        (clone / "keys" / "allowed_signers").write_text((self.cfg / "allowed_signers").read_text())
+        fremd = base / "fremd"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(fremd)], check=True, env=self.env)
+        git("add", "-A", cwd=clone)
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", f"user.signingkey={fremd}",
+            "commit", "-qm", "f", cwd=clone)
+        r = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=clone, env=self.env,
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("nicht signiert", r.stderr)
+
+    def test_pre_push_hook_requires_anchor_file(self):
+        base = Path(self._tmp.name)
+        remote, clone = base / "remote.git", base / "clone"
+        git = lambda *a, cwd=None: subprocess.run(["git", *a], cwd=cwd, env=self.env, check=True,
+                                                   capture_output=True, text=True)
+        git("init", "-q", "--bare", str(remote))
+        git("init", "-q", "-b", "main", str(clone))
+        git("remote", "add", "origin", str(remote), cwd=clone)
+        (clone / ".git" / "hooks" / "pre-push").symlink_to(HOOK)
+        self.sign_in(clone)
+        (clone / "keys" / "allowed_signers").unlink()
+        (clone / "ok.md").write_text("harmlos\n")
+        git("add", "-A", cwd=clone)
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "ok", cwd=clone)
+        r = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=clone, env=self.env,
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("fehlt oder weicht", r.stderr)
 
 
 if __name__ == "__main__":

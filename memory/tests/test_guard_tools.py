@@ -85,6 +85,10 @@ class TestGuardHook(unittest.TestCase):
                          ("Edit", {"file_path": str(self.home / ".config/polaris/radar.yaml")}),
                          ("Bash", {"command": "echo x >> ~/.config/polaris/radar.yaml"}),
                          ("Bash", {"command": "cd ~/.config/polaris && echo x >> radar.yaml"}),
+                         # Vertrauensanker fuer Updates (Fable 2026-11-11)
+                         ("Write", {"file_path": str(self.home / ".config/polaris/allowed_signers")}),
+                         ("Bash", {"command": "cp keys/allowed_signers ~/.config/polaris/allowed_signers"}),
+                         ("Bash", {"command": "cd ~/.config/polaris && cp /tmp/k allowed_signers"}),
                          ("Bash", {"command": "rm -rf ~/.claude/guard"}),
                          ("Bash", {"command": "sed -i s/x/y/ ~/.claude/settings.local.json"})]:
             self.assertEqual(self.hook("PreToolUse", tool, ti, level="standard"), "ask", (tool, ti))

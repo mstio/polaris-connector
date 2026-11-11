@@ -36,6 +36,12 @@ done
 
 cd "$REPO"
 SHA="$(git rev-parse --verify "$REF^{commit}")"
+# Spiegel-Commit signieren (seit 2026-11-11, nach dem Vorschlag eines Nutzers):
+# polaris update nimmt nur signierte Staende an. Schluessel und Signierprogramm
+# wie im Entwicklungs-Checkout (git config user.signingkey / gpg.ssh.program).
+SIGNKEY="$(git config user.signingkey || true)"
+[ -n "$SIGNKEY" ] || { echo "FEHLER: kein Signierschluessel (git config user.signingkey) - nichts veroeffentlicht." >&2; exit 1; }
+SIGN=(-c gpg.format=ssh -c "user.signingkey=$SIGNKEY" -c "gpg.ssh.program=$(git config gpg.ssh.program || echo ssh-keygen)")
 # Vorlagen (memlint, Skills, allgemeine Agentenregeln) im Gleichstand mit den
 # Live-Fassungen? (seit 2026-11-04, vorher in make-bundle.sh)
 "$REPO/scripts/check-sync.sh" || { echo "FEHLER: Vorlagen veraltet - nichts veroeffentlicht." >&2; exit 1; }
@@ -123,7 +129,7 @@ else
   PUBLIC_NAME="${PUBLIC_NAME:-$(gh api user -q .login)}"
   GIT_AUTHOR_NAME="$PUBLIC_NAME" GIT_AUTHOR_EMAIL="$PUBLIC_EMAIL" \
   GIT_COMMITTER_NAME="$PUBLIC_NAME" GIT_COMMITTER_EMAIL="$PUBLIC_EMAIL" \
-    git commit -q -m "Polaris $VERSION (Stand $(date +%F))"
+    git "${SIGN[@]}" commit -q -S -m "Polaris $VERSION (Stand $(date +%F))"
   git show --stat --format='Neuer Spiegel-Commit %h: %s' HEAD | head -40 || true
 fi
 if [ "$PUSH" = 1 ]; then

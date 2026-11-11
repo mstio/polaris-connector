@@ -20,6 +20,28 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   else
     range="$remote_sha..$local_sha"
   fi
+  # Signierte Spitze (seit 2026-11-11, nach dem Vorschlag eines Nutzers):
+  # polaris update nimmt nur Staende an, die ein Schluessel aus dem
+  # Vertrauensanker signiert hat - ein unsignierter Push wuerde alle Updates
+  # stoppen. Gleicher Anker und gleiches Pruefprogramm wie update.sh.
+  # Zweitmeinung Fable 2026-11-11: PGP/X.509 aus, Principal pruefen, und der
+  # mitveroeffentlichte keys/allowed_signers muss dem Anker entsprechen -
+  # sonst lehnen die Nutzer den Stand ab bzw. legen einen anderen Anker an.
+  signers="$HOME/.config/polaris/allowed_signers"
+  sig=(-c gpg.program=false -c gpg.openpgp.program=false -c gpg.x509.program=false
+       -c gpg.minTrustLevel=fully -c gpg.ssh.program=ssh-keygen
+       -c "gpg.ssh.allowedSignersFile=$signers" -c gpg.ssh.revocationFile=/dev/null)
+  if ! git "${sig[@]}" verify-commit "$local_sha^{commit}" >/dev/null 2>&1 ||
+     [ "$(git "${sig[@]}" log -1 --format='%G? %GS' "$local_sha^{commit}" 2>/dev/null)" != "G polaris-release" ]; then
+    echo "pre-push: Spitze ${local_sha:0:12} ist nicht signiert oder nicht mit einem Schluessel aus $signers - Push abgebrochen." >&2
+    fail=1
+  fi
+  # Pflicht (Gremium Codex 2026-11-11): ohne die Datei bekaemen neue
+  # Installationen keinen Anker und koennten nie aktualisieren.
+  if ! git show "$local_sha^{commit}:keys/allowed_signers" 2>/dev/null | cmp -s - "$signers"; then
+    echo "pre-push: keys/allowed_signers in ${local_sha:0:12} fehlt oder weicht von $signers ab (Schluesselwechsel? nur mit Nutzerfreigabe) - Push abgebrochen." >&2
+    fail=1
+  fi
   for sha in $(git rev-list "$range"); do
     # Inhalt und Metadaten (Autor, Committer, Nachricht) sind oeffentlich.
     c="$work/${sha:0:12}" m="$work/${sha:0:12}-meta"

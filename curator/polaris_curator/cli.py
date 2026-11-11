@@ -683,7 +683,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     if getattr(args, "ask", None):
         from . import healthagent
 
-        result = healthagent.ask(data, args.ask, cfg.runtime)
+        result = healthagent.ask(data, args.ask, cfg.health_agent)
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("ok") else 1
     if args.json:
@@ -714,7 +714,8 @@ def cmd_llm_check(args: argparse.Namespace) -> int:
                                                               else " (fehlt - Standardwerte)"))
     print(f"Runtime:       {cfg.runtime}  Modell: {cfg.model}  Ersatz: {cfg.fallback_model or '-'}")
     if cfg.runtime not in llm.RUNTIMES:
-        print(f"FEHLER: unbekannte runtime {cfg.runtime!r} (erlaubt: {', '.join(llm.RUNTIMES)})")
+        print(f"FEHLER: Curator-Runtime {cfg.runtime!r} nicht nutzbar. Omarchy-Standard: claude/codex; "
+              "Override: runtime: codex|claude|command in curator.yaml.")
         return 1
     missing = False
     for name, path in llm.runtime_binaries(cfg).items():
@@ -722,7 +723,7 @@ def cmd_llm_check(args: argparse.Namespace) -> int:
         missing = missing or path is None
     if missing:
         print("Fehlende CLI installieren und anmelden (codex login bzw. claude, dann /login),")
-        print("oder in curator.yaml eine vorhandene runtime eintragen (runtime: codex|claude|command).")
+        print("oder in curator.yaml eine vorhandene runtime eintragen (runtime: default|codex|claude|command).")
         return 1
     if not args.call:
         print("CLIs vorhanden. Anmeldung/Modell pruefen: polaris-curator llm-check --call")

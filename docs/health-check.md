@@ -37,13 +37,20 @@ Not every hint is always a line, even with `--all`:
   no check result yet, not "everything fine".
 - **Disk errors** appears only on machines with btrfs.
 
-In the widget every problem line offers **Ask agent**: it opens your agent
-(the curator's runtime, `claude` or `codex`) in a terminal with the message
+In the widget every problem line offers **Ask agent**: it opens Omarchy's
+default agent (`omarchy default agent`) in a terminal with the message
 and the request to find the cause and propose a fix, changing nothing before
 you agree. Safer than running a command blindly. Where the check knows a
 fitting command, the agent gets it as a suggestion; nothing is run from the
 widget. From a terminal: `polaris-curator health --ask <id>` (ids in
 `polaris-curator health --json`).
+
+To choose a different agent only for this button, set `health_agent: claude`
+or `health_agent: codex` in `~/.config/polaris/curator.yaml`. Without this key,
+the Omarchy default is used independently of the Curator's `runtime`.
+Currently, interactive Health Check prompts support Claude and Codex. If the
+selected agent is missing or unsupported, the button reports an error rather
+than silently launching a different agent.
 
 ---
 

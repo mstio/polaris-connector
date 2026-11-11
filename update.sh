@@ -7,7 +7,8 @@
 #   polaris update --check    nur nachsehen: Exit 0 = Update da, 1 = aktuell,
 #                             2 = Fehler; schreibt den Zustand fuer den Health-Check
 #
-# Ablauf: git fetch -> nur Fast-Forward (lokale Commits oder geaenderte Dateien
+# Ablauf: git fetch -> Signatur der neuen Spitze pruefen (Schluessel aus
+# ~/.config/polaris/allowed_signers) -> nur Fast-Forward (lokale Commits oder geaenderte Dateien
 # brechen ab, eigene Aenderungen gehoeren in einen Branch/Pull Request) ->
 # install.sh fuer das, was schon eingerichtet ist (Units, Widget, Dock,
 # Gedaechtnis) -> polaris-curator health. Wird der Health-Check durch das
@@ -46,7 +47,8 @@ g() { git -C "$REPO" "$@"; }
 # aendert sich sonst nur der Code, nicht die Nummer.
 version() {
   local v
-  v="$(g show "$1:extension/manifest.json" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null || echo "?")"
+  # Fremdtext aus ungeprueftem Stand: nur Versionszeichen (Zweitmeinung Fable 2026-11-11).
+  v="$(g show "$1:extension/manifest.json" 2>/dev/null | python3 -c 'import json,re,sys; v=str(json.load(sys.stdin)["version"]); print(v if re.fullmatch(r"[0-9A-Za-z.+-]{1,32}", v) else "?")' 2>/dev/null || echo "?")"
   echo "$v ($(g rev-parse --short "$1" 2>/dev/null))"
 }
 # Bausteine aus eigenen Repos mitziehen (seit 2026-11-04): omarchy-backup-CLI
@@ -131,11 +133,18 @@ if [ "$REPO" != "$APP_DIR" ] && [ -f "$APP_DIR/.git" ] \
 fi
 upstream="$(g rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" ||
   fail "der Branch $(g branch --show-current) hat kein Upstream (git branch --set-upstream-to origin/main)"
+# Voller Refname (refs/remotes/...), damit ein mitgeholtes Tag gleichen Namens
+# nichts umlenkt; Remote aus der Branch-Konfiguration (Fable 2026-11-11).
+upstream_ref="$(g rev-parse --symbolic-full-name '@{u}')" || fail "Upstream nicht aufloesbar"
+remote="$(g config "branch.$(g branch --show-current).remote" 2>/dev/null)" || remote="${upstream%%/*}"
 
-timeout 60 git -C "$REPO" fetch --quiet "${upstream%%/*}" || fail "git fetch fehlgeschlagen (Netz?)"
-old="$(g rev-parse HEAD)" new="$(g rev-parse "$upstream")"
-behind="$(g rev-list --count "HEAD..$upstream")" ahead="$(g rev-list --count "$upstream..HEAD")"
-write_state "$behind" "$(version HEAD)" "$(version "$upstream")"
+timeout 60 git -C "$REPO" fetch --quiet "$remote" || fail "git fetch fehlgeschlagen (Netz?)"
+# Ab hier nur noch $new: ein spaeterer Fetch (Health-Check, zweiter Aufruf,
+# Push im Entwicklungs-Checkout) verschiebt $upstream, aber nicht das, was
+# geprueft und gemergt wird (Fable 2026-11-11).
+old="$(g rev-parse HEAD)" new="$(g rev-parse --verify "$upstream_ref^{commit}")" || fail "Upstream $upstream_ref nicht aufloesbar"
+behind="$(g rev-list --count "HEAD..$new")" ahead="$(g rev-list --count "$new..HEAD")"
+write_state "$behind" "$(version HEAD)" "$(version "$new")"
 
 if [ "$behind" = 0 ]; then
   echo "Polaris $(version HEAD) ist aktuell."
@@ -144,7 +153,7 @@ if [ "$behind" = 0 ]; then
   exit 0
 fi
 if [ "$CHECK" = 1 ]; then
-  echo "Update verfuegbar: Polaris $(version HEAD) -> $(version "$upstream") ($behind Commit(s))"
+  echo "Update verfuegbar: Polaris $(version HEAD) -> $(version "$new") ($behind Commit(s))"
   exit 0
 fi
 
@@ -153,9 +162,38 @@ fi
 [ -z "$(g status --porcelain --untracked-files=no)" ] ||
   fail "geaenderte Dateien in $REPO (git status) - erst committen oder zuruecklegen (git stash)."
 
-echo "Polaris $(version HEAD) -> $(version "$upstream")"
-g log --oneline "HEAD..$upstream"
-g diff --stat HEAD "$upstream" | tail -n 25
+# Signatur der neuen Spitze (seit 2026-11-11, nach dem Vorschlag eines Nutzers):
+# Ohne sie bestimmt jeder, der auf das GitHub-Repo pushen kann, den Code hier.
+# Vertrauensanker ist die beim Installieren festgehaltene Kopie ausserhalb des
+# Repos, nie keys/allowed_signers aus dem neuen Stand. Pruefprogramm und Anker
+# fest per -c, damit Eintraege in .git/config sie nicht ersetzen. Die Spitze
+# genuegt: ihr Hash deckt die ganze Historie ab. Kein Schalter zum Uebergehen,
+# auch nicht mit --yes. Zweitmeinung Fable 2026-11-11: PGP/X.509 abschalten
+# (sonst entscheidet der gpg-Schluesselbund, z. B. GitHubs web-flow-Schluessel),
+# Anker nur im festen Format (Positivliste), Ergebnis G + Principal pruefen.
+SIGNERS="$HOME/.config/polaris/allowed_signers"
+SIGNER_LINE='^polaris-release namespaces="git" ssh-ed25519 [A-Za-z0-9+/]+=*$'
+[ -s "$SIGNERS" ] && [ ! -L "$SIGNERS" ] && [ ! -L "${SIGNERS%/*}" ] ||
+  fail "Vertrauensanker $SIGNERS fehlt (oder ist leer bzw. ein Symlink) - kein Update ohne Signaturpruefung. Einmal '$REPO/install.sh --yes --only-existing' ausfuehren (legt ihn aus keys/allowed_signers des installierten Stands an), den Fingerabdruck pruefen (docs/install.md, \"Signed updates\"), dann erneut."
+! grep -Evq "$SIGNER_LINE" "$SIGNERS" ||
+  fail "Vertrauensanker $SIGNERS hat Zeilen ausserhalb des erwarteten Formats (polaris-release namespaces=\"git\" ssh-ed25519 ...) - NICHT aktualisiert. Datei pruefen."
+sig() {
+  g -c gpg.program=false -c gpg.openpgp.program=false -c gpg.x509.program=false \
+    -c gpg.minTrustLevel=fully -c gpg.ssh.program=ssh-keygen \
+    -c "gpg.ssh.allowedSignersFile=$SIGNERS" -c gpg.ssh.revocationFile=/dev/null "$@"
+}
+if ! sig verify-commit "$new" >/dev/null 2>&1 ||
+   [ "$(sig log -1 --format='%G? %GS' "$new" 2>/dev/null)" != "G polaris-release" ]; then
+  case "$(sig log -1 --format=%G? "$new" 2>/dev/null)" in
+    N) why="nicht signiert" ;;
+    *) why="mit unbekanntem oder ungueltigem Schluessel signiert" ;;
+  esac
+  fail "neuer Stand $(g rev-parse --short "$new") ($upstream) ist $why - NICHT aktualisiert. Moeglich: Repo oder Konto kompromittiert, oder Schluesselwechsel (docs/install.md, \"Signed updates\"). Nicht umgehen; dem Nutzer melden."
+fi
+
+echo "Polaris $(version HEAD) -> $(version "$new")"
+g log --oneline "HEAD..$new"
+g diff --stat HEAD "$new" | tail -n 25
 echo
 if [ "$YES" != 1 ]; then
   [ -t 0 ] || fail "ohne Terminal nur mit --yes"
@@ -183,7 +221,7 @@ for unit in polaris-curator.service polaris-curator-manual.service polaris-bridg
   fi
 done
 before="$(health_level)" before_errors="$(health_errors)"
-g merge --ff-only --quiet "$upstream" || fail "Fast-Forward fehlgeschlagen; nichts geaendert."
+g merge --ff-only --quiet "$new" || fail "Fast-Forward fehlgeschlagen; nichts geaendert."
 if ! "$INSTALL" "${install_args[@]}"; then
   install_failed=1
 else
@@ -201,10 +239,10 @@ if [ "$install_failed" = 1 ] || [ -n "${new_errors// /}" ]; then
   mkdir -p "$LOG_DIR" 2>/dev/null
   echo "polaris update: install.sh oder Health-Check nach dem Update fehlgeschlagen (vorher $before, nachher $after; neu rot: ${new_errors:-keine}; install.sh fehlgeschlagen: $install_failed) - zurueck auf $(g rev-parse --short "$old"). Protokoll: $log" >&2
   g reset --hard --quiet "$old"
-  { echo "Rueckweg $(date -Iseconds): $(g rev-parse --short "$upstream") -> $(g rev-parse --short "$old"); neu rot: ${new_errors:-keine}"
+  { echo "Rueckweg $(date -Iseconds): $(g rev-parse --short "$new") -> $(g rev-parse --short "$old"); neu rot: ${new_errors:-keine}"
     "$INSTALL" "${install_args[@]}"; } >"$log" 2>&1 \
     || echo "polaris update: auch die Wiederherstellung mit install.sh meldet Fehler ($log) - bitte $INSTALL von Hand ausfuehren." >&2
-  write_state "$behind" "$(version HEAD)" "$(version "$upstream")"
+  write_state "$behind" "$(version HEAD)" "$(version "$new")"
   exit 2
 fi
 

@@ -17,9 +17,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .default_agent import SUPPORTED, omarchy_default
 from .i18n import t
 
-AGENTS = ("claude", "codex")
 APP_ID = "org.omarchy.agent"
 MAX_DETAIL = 1500
 _ID = re.compile(r"^[a-z0-9][a-z0-9/_.-]{0,40}$")
@@ -34,12 +34,10 @@ def find(data: dict, cid: str) -> dict | None:
     return None
 
 
-def pick_agent(runtime: str) -> str | None:
-    """Standard-Agent = Laufzeit des Curators (claude|codex), sonst der erste
-    installierte. Nur Namen aus der festen Liste."""
-    order = [runtime] if runtime in AGENTS else []
-    order += [a for a in AGENTS if a not in order]
-    return next((a for a in order if shutil.which(a)), None)
+def pick_agent(preference: str) -> str | None:
+    """Use the explicit Health-Check choice or Omarchy's default, never the curator."""
+    agent = omarchy_default() if preference == "default" else preference
+    return agent if isinstance(agent, str) and agent in SUPPORTED and shutil.which(agent) else None
 
 
 def _clean(text: str) -> str:
@@ -66,15 +64,15 @@ def prompt(c: dict) -> str:
     return "\n".join(lines)
 
 
-def ask(data: dict, cid: str, runtime: str) -> dict:
+def ask(data: dict, cid: str, preference: str = "default") -> dict:
     if not _ID.match(cid or ""):
         return {"ok": False, "error": t("unbekannte Meldung")}
     c = find(data, cid)
     if c is None:
         return {"ok": False, "error": t("Meldung nicht (mehr) vorhanden")}
-    agent = pick_agent(runtime)
+    agent = pick_agent(preference)
     if agent is None:
-        return {"ok": False, "error": t("kein Agent gefunden (claude oder codex)")}
+        return {"ok": False, "error": t("Gewählter Agent fehlt oder wird nicht unterstützt (claude oder codex)")}
     if not shutil.which("omarchy-launch-tui"):
         return {"ok": False, "error": t("omarchy-launch-tui fehlt")}
     try:

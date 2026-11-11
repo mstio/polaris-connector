@@ -1,0 +1,16 @@
+# Omarchy's default agent is used for the Curator, unless runtime is set here.
+# Currently supported: codex and claude. Model defaults follow that agent.
+# With Claude, image attachments are omitted (the document text is still curated).
+runtime: default
+monitoring:
+  chat_sources: [chatgpt, claude]
+budget:
+  max_batches_per_run: 3
+  max_llm_calls_per_run: 3
+  max_input_chars_per_batch: 100000
+  max_total_input_chars_per_run: 250000
+context:
+  max_curated_context_chars: 200000
+llm_timeout_seconds: 1200
+reasoning_effort: medium
+language: en

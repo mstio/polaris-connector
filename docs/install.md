@@ -16,9 +16,9 @@ downloads nothing. It creates:
 
 - symlinks `~/.local/bin/polaris` and `polaris-curator`
 - the bridge configuration and `project_roots`
-- a `curator.yaml` from `curator/curator.example-{codex,claude}.yaml`, only
-  if none exists (runtime `codex` if installed, otherwise `claude`, or
-  `--runtime`; chat sources with `--chat-sources both|chatgpt|claude|none`;
+- a `curator.yaml` from `curator/curator.example-{default,codex,claude}.yaml`, only
+  if none exists (Omarchy's default agent, or an explicit `--runtime`;
+  chat sources with `--chat-sources both|chatgpt|claude|none`;
   language with `--language en|de`, default `de` for a German system
   language, otherwise `en`)
 - the systemd units (bridge path/timer, curator timer, radar timer)
@@ -28,6 +28,8 @@ Replaced files are backed up to `~/.local/share/polaris/install-backups/<time>/`
 Requirements: `python3` with PyYAML (`python-yaml`), `bubblewrap` (sandbox for
 foreign content; without it nothing is curated), `jq` for the widget,
 `codex` or `claude` (logged in) for the curator, Firefox for the extension.
+The Omarchy default agent must be set to Claude or Codex for the Curator's
+default runtime. An explicit `runtime` in `curator.yaml` takes precedence.
 The extension itself is installed by hand (see
 [Installing the extension](browser-capture.md#installing-the-extension-firefox)).
 
@@ -68,7 +70,8 @@ polaris update --yes      # no question (for agents)
 polaris update --check    # only look; exit 0 = update available
 ```
 
-`update.sh` runs `git fetch`, fast-forward only, then
+`update.sh` runs `git fetch`, checks the signature of the new state (see
+"Signed updates" below), fast-forward only, then
 `install.sh --yes --only-existing` for what is already set up (units,
 widgets, dock, memory; nothing new is added), then `polaris-curator health`,
 and finally checks the companion parts: the omarchy-backup checkout in
@@ -88,6 +91,50 @@ example rclone), bridge, curator and mirror start after it:
 `<unit>.d/polaris-storage.conf` (default: `rclone-projekte.service` if it
 exists). Local folders, such as a Nextcloud sync folder, need nothing
 (`--storage-unit none`).
+
+### Signed updates
+
+Since 2026-11-11 (suggested by a user) `polaris update` only takes a new
+state whose newest commit carries a valid SSH signature from a key in
+`~/.config/polaris/allowed_signers`. Without it, anyone who can push to the
+GitHub repository (a stolen token, a compromised account) would decide which
+code runs on every machine at the next update.
+
+- `install.sh` creates `~/.config/polaris/allowed_signers` once from
+  `keys/allowed_signers` and never replaces it. The trust anchor is your copy,
+  not the file in the repository, so a compromised repository cannot swap the
+  key unnoticed. If they differ, `install.sh` warns and leaves yours alone.
+- Release key fingerprint (compare once, on a second channel if you can):
+  `SHA256:/dq2rdkVooggf6DNSBzEJ6d5rb6L0/RZ6BOYi3+xvQQ` (ED25519)
+- No signature, or a key that is not in your anchor: the update stops, with
+  `--yes` too, and nothing changes. There is no switch to skip the check.
+  Take it seriously: either the repository was tampered with, or the key was
+  changed (then the changelog says so, and the new key is announced first).
+- Key change: check the new fingerprint, then replace the file by hand
+  (`cp ~/.local/share/polaris/app/keys/allowed_signers ~/.config/polaris/`).
+- **Existing installs, once:** the update that brings this check is itself
+  still taken unchecked by your old `update.sh`. Check it before you update:
+
+  ```bash
+  APP=~/.local/share/polaris/app
+  git -C "$APP" fetch
+  git -C "$APP" show '@{u}:keys/allowed_signers' > /tmp/polaris-signers
+  awk '{print $3, $4}' /tmp/polaris-signers | ssh-keygen -lf -   # = fingerprint above?
+  git -C "$APP" -c gpg.program=false -c gpg.openpgp.program=false \
+    -c gpg.x509.program=false -c gpg.minTrustLevel=fully -c gpg.ssh.program=ssh-keygen \
+    -c gpg.ssh.allowedSignersFile=/tmp/polaris-signers log -1 --format='%G? %GS' '@{u}'
+  # expected output: G polaris-release
+  ```
+
+  Only if the fingerprint matches the one you got on a second channel and
+  the last command prints `G polaris-release`, run `polaris update`. It then
+  prints the anchor's fingerprint once more.
+- Limits: the very first install trusts GitHub. A compromised machine of the
+  publisher is not covered. Companion parts (omarchy-backup, widgets) are not
+  signed yet; they are only shown before they are pulled.
+- Check by hand (PGP and X.509 switched off, so only the SSH anchor counts;
+  expected output `G polaris-release`):
+  `git -C ~/.local/share/polaris/app -c gpg.program=false -c gpg.openpgp.program=false -c gpg.x509.program=false -c gpg.minTrustLevel=fully -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile=$HOME/.config/polaris/allowed_signers log -1 --format='%G? %GS' '@{u}'`
 
 ### Switching from the install bundle to a git checkout
 

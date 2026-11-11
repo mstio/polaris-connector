@@ -74,7 +74,8 @@ The widget is a thin UI; all logic stays in the `polaris-curator` CLI.
   `journalctl --user -u polaris-curator-manual`.
 - **Ask agent** passes only the message id (`run-action ask-agent <id>`);
   `polaris-curator health --ask` rebuilds the message from a fresh health
-  check and opens your agent (the curator's runtime, `claude` or `codex`) via
+  check and opens Omarchy's default agent (`claude` or `codex`, unless
+  `health_agent` is set in `curator.yaml`) via
   `omarchy-launch-tui` as an argument list. The agent is told to check, to
   ask before changing anything, and to treat the message as data.
 - Opening files uses `xdg-open`. No root, no network access of its own, no

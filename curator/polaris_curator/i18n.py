@@ -217,6 +217,12 @@ EN: dict[str, str] = {
         'curator.yaml unreadable: {e}',
     'unbekannte runtime {runtime!r}':
         'unknown runtime {runtime!r}',
+    'Omarchy-Standardagent für den Curator nicht nutzbar':
+        'Omarchy default agent cannot run the curator',
+    'Omarchy-Standardagent fehlt, wird nicht unterstützt oder ist mit einem festen Modell kombiniert':
+        'Omarchy default agent is missing, unsupported, or combined with a fixed model',
+    'curator.yaml: health_agent muss default, claude oder codex sein':
+        'curator.yaml: health_agent must be default, claude, or codex',
     '{main} fehlt – polaris-curator llm-check':
         '{main} missing – polaris-curator llm-check',
     'installiert, aber noch kein Snapshot':
@@ -411,8 +417,8 @@ EN: dict[str, str] = {
         'unknown message',
     'Meldung nicht (mehr) vorhanden':
         'message no longer present',
-    'kein Agent gefunden (claude oder codex)':
-        'no agent found (claude or codex)',
+    'Gewählter Agent fehlt oder wird nicht unterstützt (claude oder codex)':
+        'selected agent is missing or unsupported (claude or codex)',
     'omarchy-launch-tui fehlt':
         'omarchy-launch-tui is missing',
 }

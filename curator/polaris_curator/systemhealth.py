@@ -510,6 +510,8 @@ def check_llm() -> dict:
     except Exception as e:  # noqa: BLE001 - kaputte curator.yaml
         return _c("llm", label, "error", t("curator.yaml unlesbar: {e}", e=e))
     if cfg.runtime not in llm.RUNTIMES:
+        if cfg.runtime == "unavailable":
+            return _c("llm", label, "error", t("Omarchy-Standardagent für den Curator nicht nutzbar"))
         return _c("llm", label, "error", t("unbekannte runtime {runtime!r}", runtime=cfg.runtime))
     bins = llm.runtime_binaries(cfg)
     missing = [b for b, path in bins.items() if path is None]

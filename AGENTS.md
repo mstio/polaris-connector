@@ -52,6 +52,7 @@ Neue Funktionen nutzen sie, ändern sie nicht nebenbei. Die Liste prüft
 - `memory/tools/claude-guard-einschalten.sh` – schaltet den Hook ein
 - `memory/tools/home-snapshots-einrichten.sh` – Snapshots von /home
 - `update.sh` – Lieferkette: was live geht
+- `keys/allowed_signers` – Signaturschlüssel für Updates (Vorlage des Vertrauensankers)
 - `install.sh` – installiert Befehle, Units, Native Host und Schutzwerkzeuge
 - `curator/polaris_curator/llm.py` – Sandbox-Anbindung der Modelle, Rückschreiben der Anmeldung
 <!-- schutzdateien:end -->

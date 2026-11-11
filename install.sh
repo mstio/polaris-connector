@@ -4,7 +4,7 @@
 # Rechner ein - idempotent, auf dem Entwicklungsrechner ein No-op (seit 2026-10-07).
 #
 #   ./install.sh                 gefuehrte Einrichtung (fragt nach, bestaetigen)
-#   ./install.sh [--yes] [--dry-run] [--projects <Ordner>] [--runtime codex|claude|command]
+#   ./install.sh [--yes] [--dry-run] [--projects <Ordner>] [--runtime default|codex|claude|command]
 #                [--chat-sources both|chatgpt|claude|none]
 #                [--no-units] [--no-widget] [--no-dock] [--no-restart] [--no-backup] [--no-memory]
 #                [--backup-target <Ordner>] [--memory-mirror <Ordner>] [--memory-from-mirror]
@@ -15,9 +15,9 @@
 #   --dry-run    nur anzeigen, was passieren wuerde
 #   --projects   Ordner, in dem die Projektordner liegen (polaris roots add)
 #   --runtime    Modell-Runtime fuer eine NEU anzulegende curator.yaml:
-#                codex, claude oder command (beliebige Agenten-CLI, Vorlage
-#                curator/curator.example-command.yaml anpassen). Standard:
-#                codex, falls installiert, sonst claude
+#                default (Omarchy), codex, claude oder command (beliebige
+#                Agenten-CLI, curator/curator.example-command.yaml anpassen).
+#                Standard: default; unterstützt hier codex und claude.
 #   --chat-sources  Browser-Chats fuer eine NEU anzulegende curator.yaml;
 #                unabhaengig von der Curator-Runtime. Ohne Option gilt die Vorlage.
 #   --language   Sprache von Widget und Health Check fuer eine NEU anzulegende
@@ -92,7 +92,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
     --projects) PROJECTS="${2:?--projects braucht einen Ordner}"; shift ;;
-    --runtime) RUNTIME="${2:?--runtime braucht codex|claude|command}"; shift ;;
+    --runtime) RUNTIME="${2:?--runtime braucht default|codex|claude|command}"; shift ;;
     --language) UI_LANG="${2:?--language braucht en|de}"; shift ;;
     --chat-sources) CHAT_SOURCES="${2:?--chat-sources braucht both|chatgpt|claude|none}"; shift ;;
     --no-units) UNITS=0 ;;
@@ -112,7 +112,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-case "$RUNTIME" in ""|codex|claude|command) ;; *) echo "--runtime: codex, claude oder command" >&2; exit 2 ;; esac
+case "$RUNTIME" in ""|default|codex|claude|command) ;; *) echo "--runtime: default, codex, claude oder command" >&2; exit 2 ;; esac
 case "$CHAT_SOURCES" in ""|both|chatgpt|claude|none) ;; *) echo "--chat-sources: both, chatgpt, claude oder none" >&2; exit 2 ;; esac
 # Sprache fuer eine neue curator.yaml: deutsche Systemsprache -> de, sonst en.
 if [ -z "${UI_LANG:-}" ]; then case "${LANG:-}" in de_*|de) UI_LANG=de ;; *) UI_LANG=en ;; esac; fi
@@ -275,13 +275,13 @@ TXT
     fi
   fi
   # 2. Modell
-  if command -v codex >/dev/null; then def_rt=codex; elif command -v claude >/dev/null; then def_rt=claude; else def_rt=codex; fi
+  def_rt=default
   say ""
-  say "2) Modell fuer den Curator: codex (OpenAI), claude (Anthropic) oder command (andere Agenten-CLI)."
+  say "2) Agent fuer den Curator: default (Omarchy), codex, claude oder command (andere Agenten-CLI)."
   say "   Gefunden: $(for c in codex claude; do command -v $c >/dev/null && printf '%s ' $c; done)"
   while :; do
     ask "   Runtime" "$def_rt"; RUNTIME="$REPLY"
-    case "$RUNTIME" in codex|claude|command) break ;; *) say "   bitte codex, claude oder command" ;; esac
+    case "$RUNTIME" in default|codex|claude|command) break ;; *) say "   bitte default, codex, claude oder command" ;; esac
   done
   if [ ! -f "$POLARIS_CFG/curator.yaml" ]; then
     say "   Welche Browser-Chats werden erfasst? Unabhaengig vom Curator-Modell."
@@ -509,6 +509,32 @@ elif ! timeout 10 bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all -- /
 fi
 command -v rsync >/dev/null || warn "rsync fehlt - Spiegel des Maschinengedaechtnisses geht erst danach (sudo pacman -S rsync)"
 
+# Vertrauensanker fuer polaris update (seit 2026-11-11, nach dem Vorschlag eines
+# Nutzers): einmal aus keys/allowed_signers anlegen, danach nie ersetzen. Ein
+# kompromittiertes Repo kann so den Schluessel nicht still austauschen; ein
+# echter Schluesselwechsel geht nur von Hand (docs/install.md, "Signed updates").
+step "Vertrauensanker fuer Updates ($(tilde "$POLARIS_CFG")/allowed_signers)"
+SIGNERS_SRC="$REPO/keys/allowed_signers" SIGNERS="$POLARIS_CFG/allowed_signers"
+# Positivliste wie in update.sh (Zweitmeinung Fable 2026-11-11): jede Zeile genau
+# ein ed25519-Schluessel fuer "polaris-release"; so zeigt der Fingerabdruck alles.
+SIGNER_LINE='^polaris-release namespaces="git" ssh-ed25519 [A-Za-z0-9+/]+=*$'
+signers_ok() { [ -s "$1" ] && ! grep -Evq "$SIGNER_LINE" "$1"; }
+signers_fp() { awk '{print $3, $4}' "$1" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}' | paste -sd' '; }
+command -v ssh-keygen >/dev/null || warn "ssh-keygen fehlt (openssh) - polaris update kann Signaturen nicht pruefen und bricht ab"
+if ! signers_ok "$SIGNERS_SRC"; then
+  warn "$SIGNERS_SRC fehlt oder hat ein unerwartetes Format - kein Anker angelegt; polaris update bricht ab"
+elif [ -L "$SIGNERS" ] || [ -L "$POLARIS_CFG" ]; then
+  warn "$SIGNERS bzw. $POLARIS_CFG ist ein Symlink - nicht angefasst; polaris update lehnt das ab"
+elif [ ! -s "$SIGNERS" ]; then  # fehlt oder leer: ein leerer Anker vertraut niemandem
+  run install -m 644 "$SIGNERS_SRC" "$SIGNERS"
+  if [ "$DRY" = 1 ]; then say "  wuerde angelegt, Schluessel: $(signers_fp "$SIGNERS_SRC")"
+  else say "  angelegt, Schluessel: $(signers_fp "$SIGNERS_SRC") - mit docs/install.md (\"Signed updates\") vergleichen"; fi
+elif cmp -s "$SIGNERS_SRC" "$SIGNERS"; then
+  say "  vorhanden, Schluessel: $(signers_fp "$SIGNERS")"
+else
+  warn "$SIGNERS weicht von keys/allowed_signers ab - NICHT ersetzt (festgehalten: $(signers_fp "$SIGNERS"); im Repo: $(signers_fp "$SIGNERS_SRC")). Schluesselwechsel nur nach Pruefung ueber einen zweiten Weg, dann von Hand kopieren."
+fi
+
 step "Befehle in $BIN_DIR"
 [ -d "$BIN_DIR" ] || run mkdir -p "$BIN_DIR"
 for pair in "polaris:bridge/bin/polaris" "polaris-curator:curator/bin/polaris-curator" \
@@ -557,10 +583,19 @@ step "Curator-Modell ($POLARIS_CFG/curator.yaml)"
 if [ -f "$POLARIS_CFG/curator.yaml" ]; then
   say "  vorhanden, unveraendert"
 else
-  if [ -z "$RUNTIME" ]; then
-    if command -v codex >/dev/null; then RUNTIME=codex
-    elif command -v claude >/dev/null; then RUNTIME=claude
-    else RUNTIME=codex; warn "weder codex noch claude installiert - Curator laeuft erst nach Einrichtung einer CLI"; fi
+  [ -n "$RUNTIME" ] || RUNTIME=default
+  if [ "$RUNTIME" = default ]; then
+    selected_agent=""
+    if command -v omarchy-default-agent >/dev/null 2>&1; then
+      selected_agent="$(omarchy-default-agent 2>/dev/null || true)"
+    fi
+    case "$selected_agent" in
+      codex|claude)
+        command -v "$selected_agent" >/dev/null 2>&1 ||
+          warn "Omarchy-Standardagent $selected_agent ist nicht installiert; Curator startet erst nach dessen Einrichtung oder einem Runtime-Override"
+        ;;
+      *) warn "Kein von Polaris unterstützter Omarchy-Standardagent (codex/claude); Curator startet erst nach dessen Auswahl oder --runtime" ;;
+    esac
   fi
   tmpl="$REPO/curator/curator.example-$RUNTIME.yaml"
   run mkdir -p "$POLARIS_CFG"

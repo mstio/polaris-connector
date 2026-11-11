@@ -139,17 +139,15 @@ applies (existing installations stay German); new installations set it via
 `install.sh --language` or the system language. The field labels in
 `knowledge.md` etc. stay German for now.
 
-Built-in defaults (`config.py`, used for every key missing from
-`curator.yaml`):
+Defaults for new Omarchy installations (`curator.example-default.yaml` and
+`config.py`; old files without `runtime` retain Codex):
 
 ```yaml
-provider: openai
-runtime: codex
-model: gpt-5.6-luna        # low-cost model, see note below
-fallback_model: gpt-5.6-sol
+runtime: default          # Omarchy default agent; supported: codex, claude
+# model follows the selected agent (Codex: gpt-6-astra; Claude: opus)
 permit_more_expensive_fallback: false
-llm_timeout_seconds: 180
-reasoning_effort: null     # CLI default
+llm_timeout_seconds: 1200
+reasoning_effort: medium
 batching:
   min_messages_for_early_run: 10   # currently without effect, see below
   min_chars_for_early_run: 8000    # currently without effect, see below
@@ -157,10 +155,10 @@ budget:
   max_batches_per_run: 3
   max_llm_calls_per_run: 3
   max_messages_per_batch: 40
-  max_input_chars_per_batch: 50000
-  max_total_input_chars_per_run: 120000
+  max_input_chars_per_batch: 100000
+  max_total_input_chars_per_run: 250000
 context:
-  max_curated_context_chars: 50000
+  max_curated_context_chars: 200000
   full_context_chars: 80000     # above this: index + full text of what is relevant
   index_cap: 0.25               # index at most 25 % of that (0 = all entries)
 attachments:
@@ -169,20 +167,22 @@ attachments:
   max_chars_per_attachment: 20000
 ```
 
-The template that `install.sh` writes for Codex
-(`curator.example-codex.yaml`) deliberately overrides several of these:
-`model: gpt-6-astra`, `reasoning_effort: medium`, `llm_timeout_seconds: 1200`,
-`max_input_chars_per_batch: 100000`, `max_total_input_chars_per_run: 250000`,
-`max_curated_context_chars: 200000`, plus `language`,
-`monitoring.chat_sources`, `claude_fallback_model` and `reviewer_model`
-(both `null` = off).
+The Codex and Claude templates set their model names explicitly. The new
+default template leaves them open so the selected agent gets a matching model.
+Without an explicit runtime, Polaris reads Omarchy's selected agent at each
+run. Claude then uses `opus` by default with `sonnet` as fallback. An
+explicit model needs an explicit runtime to avoid mismatches after an Omarchy
+agent switch. The Health Check's **Ask agent** button independently follows Omarchy's default;
+`health_agent: claude` or `health_agent: codex` in that file overrides it.
+Older files without a `runtime` key and sparse files with an explicit runtime
+retain the previous Codex-oriented fallback values for any omitted settings.
 
 **Model IDs**: `gpt-5.6-luna` was identified on 2026-09-12 from
 `~/.codex/models_cache.json` as "Fast and affordable agentic coding
-model" - a good fit for a pure extraction/merge task - and is still the
-built-in default. `gpt-5.6-sol` was the user's global Codex default model at
-that time and serves as the fallback. Since 2026-09-24 the Codex template
-uses `gpt-6-astra` (see "Model strategy"). Model catalogues go stale - adjust in `~/.config/polaris/curator.yaml`
+model" - a good fit for a pure extraction/merge task. `gpt-5.6-sol` was the
+user's global Codex default model at that time and serves as the fallback.
+The Omarchy-default path and the Codex template use `gpt-6-astra` (see "Model
+strategy"). Model catalogues go stale - adjust in `~/.config/polaris/curator.yaml`
 as needed, without changing code.
 
 **`min_messages_for_early_run` / `min_chars_for_early_run`**: Intended in

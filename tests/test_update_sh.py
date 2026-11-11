@@ -2,6 +2,10 @@
 
 Rueckmeldung von bernhard2804: Der Health-Check im selben Update-Lauf meldete
 noch "Update verfuegbar", weil update-check.json erst danach geschrieben wurde.
+
+Seit 2026-11-11 (nach dem Vorschlag eines Nutzers): update.sh uebernimmt nur
+eine Upstream-Spitze, die ein Schluessel aus ~/.config/polaris/allowed_signers
+signiert hat.
 """
 import json
 import os
@@ -20,12 +24,29 @@ def git(cwd, *args):
     subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, env=GITENV)
 
 
+def keygen(path: Path) -> Path:
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", str(path)],
+                   check=True, env=GITENV)
+    return path
+
+
+def signed(key: Path, *args) -> tuple:
+    """git-Argumente fuer einen mit `key` signierten Commit."""
+    return ("-c", "gpg.format=ssh", "-c", f"user.signingkey={key}", *args, "-S")
+
+
 class TestUpdateState(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="polaris-update-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.home = self.tmp / "home"
         self.home.mkdir()
+        # Vertrauensanker wie von install.sh angelegt, mit Test-Schluessel.
+        self.key = keygen(self.tmp / "release")
+        self.signers = self.home / ".config/polaris/allowed_signers"
+        self.signers.parent.mkdir(parents=True)
+        pub = " ".join(Path(f"{self.key}.pub").read_text().split()[:2])
+        self.signers.write_text(f'polaris-release namespaces="git" {pub}\n')
         up, work = self.tmp / "up.git", self.tmp / "work"
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(up)], check=True, env=GITENV)
         subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True, env=GITENV)
@@ -45,9 +66,19 @@ class TestUpdateState(unittest.TestCase):
             git(other, "config", k, v)
         (other / "neu.txt").write_text("x")
         git(other, "add", "-A")
-        git(other, "commit", "-q", "-m", "b")
+        git(other, *signed(self.key, "commit", "-q", "-m", "b"))
         git(other, "push", "-q")
+        self.other = other
         self.work = work
+
+    def replace_upstream_tip(self, *sign):
+        """Spitze im Upstream durch einen anders (oder nicht) signierten Commit ersetzen."""
+        git(self.other, "reset", "-q", "--hard", "HEAD~1")
+        (self.other / "neu.txt").write_text("y")
+        git(self.other, "add", "-A")
+        commit = ("commit", "-q", "-m", "b2")
+        git(self.other, *(signed(sign[0], *commit) if sign else commit))
+        git(self.other, "push", "-q", "--force")
 
     def run_update(self, health_body: str, install: str = "true", active: str = ""):
         self.seen = self.tmp / "seen.txt"
@@ -60,7 +91,7 @@ class TestUpdateState(unittest.TestCase):
         sysctl = self.tmp / "systemctl.sh"
         sysctl.write_text("#!/bin/sh\nfor a in \"$@\"; do case \" " + active + " \" in *\" $a \"*) exit 0 ;; esac; done\nexit 3\n")
         sysctl.chmod(0o755)
-        env = {**GITENV, "HOME": str(self.home), "POLARIS_UPDATE_INSTALL": install,
+        env = {**GITENV, **getattr(self, "extra_env", {}), "HOME": str(self.home), "POLARIS_UPDATE_INSTALL": install,
                "POLARIS_UPDATE_HEALTH": str(health), "POLARIS_UPDATE_SYSTEMCTL": str(sysctl)}
         return subprocess.run(["bash", str(self.work / "update.sh"), "--yes"], env=env,
                               capture_output=True, text=True)
@@ -175,6 +206,115 @@ class TestUpdateState(unittest.TestCase):
         self.assertFalse((self.work / "neu.txt").exists())
         self.assertEqual(json.loads(self.state.read_text())["behind"], 1)
 
+
+    def test_unsigned_upstream_is_refused(self):
+        self.replace_upstream_tip()
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        self.assertIn("nicht signiert", r.stderr)
+
+    def test_foreign_signature_is_refused(self):
+        self.replace_upstream_tip(keygen(self.tmp / "fremd"))
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        self.assertIn("unbekannt", r.stderr)
+
+    def test_missing_trust_anchor_refuses(self):
+        self.signers.unlink()
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        self.assertIn("allowed_signers", r.stderr)
+
+    def test_repo_config_cannot_swap_the_anchor_or_program(self):
+        # Eintraege in .git/config zaehlen nicht. Das Ersatzprogramm ahmt eine
+        # gute ssh-keygen-Pruefung nach (Fable 2026-11-11: frueher bestand der
+        # Test auch ohne Pin, weil es nichts ausgab).
+        foreign = keygen(self.tmp / "fremd")
+        prog = self.tmp / "always-ok.sh"
+        prog.write_text('#!/bin/sh\ncase "$*" in *find-principals*) echo polaris-release ;; '
+                        '*) echo \'Good "git" signature for polaris-release with ED25519 key SHA256:x\' ;; esac\nexit 0\n')
+        prog.chmod(0o755)
+        git(self.work, "config", "gpg.ssh.program", str(prog))
+        git(self.work, "config", "gpg.ssh.allowedSignersFile", str(self.tmp / "egal"))
+        self.replace_upstream_tip(foreign)
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        self.assertIn("unbekannt", r.stderr)
+
+    def test_pgp_signature_does_not_count(self):
+        # Fable 2026-11-11 (nachgeprueft): ohne Sperre entschied der gpg-Schluesselbund.
+        gnupg = self.tmp / "gnupg"
+        gnupg.mkdir(mode=0o700)
+        env = {**GITENV, "GNUPGHOME": str(gnupg)}
+        subprocess.run(["gpg", "--batch", "--quiet", "--passphrase", "", "--quick-gen-key",
+                        "polaris-release", "ed25519", "sign", "never"], check=True, env=env,
+                       capture_output=True)
+        git(self.other, "reset", "-q", "--hard", "HEAD~1")
+        (self.other / "neu.txt").write_text("pgp")
+        subprocess.run(["git", "-C", str(self.other), "add", "-A"], check=True, env=env)
+        fpr = [l.split(":")[9] for l in subprocess.run(
+            ["gpg", "--list-keys", "--with-colons"], env=env, capture_output=True, text=True,
+            check=True).stdout.splitlines() if l.startswith("fpr:")][0]
+        subprocess.run(["git", "-C", str(self.other), "commit", "-q", f"-S{fpr}", "-m", "pgp"],
+                       check=True, env=env, capture_output=True)
+        subprocess.run(["git", "-C", str(self.other), "push", "-q", "--force"], check=True, env=env)
+        self.extra_env = {"GNUPGHOME": str(gnupg)}
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+
+    def test_fetch_during_update_cannot_slip_in_unsigned_commit(self):
+        # Fable 2026-11-11: geprueft wurde $new, gemergt $upstream. Der Health-
+        # Check holt hier zwischendurch einen unsignierten Nachfolger.
+        (self.other / "boese.txt").write_text("x")
+        git(self.other, "add", "-A")
+        git(self.other, "commit", "-q", "-m", "unsigniert")
+        late = self.tmp / "late.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(self.other), str(late)], check=True, env=GITENV)
+        body = (f"git -C '{self.work}' fetch -q '{late}' '+refs/heads/main:refs/remotes/origin/main' 2>/dev/null\n"
+                + self.health_switch((), ()))
+        r = self.run_update(body)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.work / "neu.txt").exists())
+        self.assertFalse((self.work / "boese.txt").exists())
+
+    def test_tag_named_like_upstream_is_ignored(self):
+        # Fable 2. Runde: das Tag muss erst mit dem Fetch ankommen (alter Stand).
+        git(self.other, "tag", "origin/main", "HEAD~1")
+        git(self.other, "push", "-q", "origin", "origin/main")
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.work / "neu.txt").exists())
+
+    def test_anchor_with_unexpected_lines_refuses(self):
+        foreign = keygen(self.tmp / "fremd")
+        extra = " ".join(Path(f"{foreign}.pub").read_text().split()[:2])
+        self.signers.write_text(self.signers.read_text() + f'* namespaces="git" {extra}\n')
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("Format", r.stderr)
+
+    def test_symlinked_anchor_dir_refuses(self):
+        cfg = self.signers.parent
+        real = self.tmp / "polaris-cfg"
+        cfg.rename(real)
+        cfg.symlink_to(real)
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+
+    def test_symlinked_anchor_refuses(self):
+        real = self.tmp / "anker"
+        real.write_text(self.signers.read_text())
+        self.signers.unlink()
+        self.signers.symlink_to(real)
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
 
 if __name__ == "__main__":
     unittest.main()

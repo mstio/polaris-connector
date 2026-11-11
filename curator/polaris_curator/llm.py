@@ -304,6 +304,8 @@ def call_llm(
     Ersatzmodell laufen ueber die Claude-Code-CLI. Bilder (Mail-Anhaenge)
     kann dieser Weg nicht mitgeben - sie entfallen mit Warnung, der Text des
     Dokuments wird trotzdem kuratiert."""
+    if cfg.runtime not in RUNTIMES:
+        raise LlmUnavailableError(f"Curator-Runtime nicht verfügbar: {cfg.runtime}")
     usage.mark(f"llm:runtime:{cfg.runtime}")  # Nutzungszaehler (ADR 003)
     if cfg.runtime == "command":
         if images:
@@ -579,6 +581,8 @@ def check_call(cfg: CuratorConfig) -> LlmResult:
     """Ein winziger echter Aufruf des Hauptmodells ohne Ersatzstufen - zeigt,
     ob CLI, Anmeldung und Modellname stimmen (polaris-curator llm-check --call)."""
     prompt = 'Antworte ausschliesslich mit dem JSON-Objekt {"ok": true}.'
+    if cfg.runtime not in RUNTIMES:
+        raise LlmUnavailableError(f"Curator-Runtime nicht verfügbar: {cfg.runtime}")
     if cfg.runtime == "claude":
         return _run_claude(prompt, cfg.model, cfg, _CHECK_SCHEMA)
     if cfg.runtime == "command":

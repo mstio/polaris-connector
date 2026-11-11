@@ -55,6 +55,9 @@ class TestLanguageSelection(unittest.TestCase):
             p = patch.object(config, name, value)
             p.start()
             self.addCleanup(p.stop)
+        p = patch.object(config, "omarchy_default", return_value="codex")
+        p.start()
+        self.addCleanup(p.stop)
 
     def _without_env(self):
         env = {k: v for k, v in os.environ.items() if k != "POLARIS_LANG"}
@@ -106,7 +109,8 @@ class TestLanguageSelection(unittest.TestCase):
         text = self.cfg_file.read_text(encoding="utf-8")
         self.assertIn("# Language of the widget and health check: en or de", text)
         self.assertEqual(yaml.safe_load(text)["language"], "en")
-        self.assertEqual(yaml.safe_load(text)["model"], config.DEFAULT_MODEL)
+        self.assertEqual(yaml.safe_load(text)["runtime"], "default")
+        self.assertNotIn("model", yaml.safe_load(text))
         with self._without_env():
             self.assertEqual(i18n.language(), "en")
 
@@ -114,6 +118,67 @@ class TestLanguageSelection(unittest.TestCase):
         self.cfg_file.write_text("model: x\n", encoding="utf-8")
         config.ensure_global_config()
         self.assertEqual(self.cfg_file.read_text(encoding="utf-8"), "model: x\n")
+
+    def test_curator_defaults_to_omarchy_but_local_override_wins(self):
+        self.cfg_file.write_text("runtime: default\n", encoding="utf-8")
+        with patch.object(config, "omarchy_default", return_value="claude"):
+            cfg = config.load_config()
+        self.assertEqual((cfg.runtime, cfg.model, cfg.fallback_model, cfg.health_agent),
+                         ("claude", "opus", "sonnet", "default"))
+        self.cfg_file.write_text("runtime: codex\nmodel: gpt-local\nhealth_agent: claude\n", encoding="utf-8")
+        with patch.object(config, "omarchy_default", return_value="claude"):
+            cfg = config.load_config()
+        self.assertEqual((cfg.runtime, cfg.model, cfg.health_agent),
+                         ("codex", "gpt-local", "claude"))
+
+    def test_missing_omarchy_default_is_reported(self):
+        self.cfg_file.write_text("runtime: default\n", encoding="utf-8")
+        with patch.object(config, "omarchy_default", return_value=None):
+            cfg = config.load_config()
+        self.assertEqual(cfg.runtime, "unavailable")
+        self.assertIn("Standardagent", cfg.config_problems[0])
+
+    def test_legacy_model_without_runtime_stays_codex(self):
+        self.cfg_file.write_text("model: gpt-legacy\n", encoding="utf-8")
+        with patch.object(config, "omarchy_default", return_value="claude"):
+            cfg = config.load_config()
+        self.assertEqual((cfg.runtime, cfg.model), ("codex", "gpt-legacy"))
+
+    def test_legacy_sparse_file_stays_codex(self):
+        self.cfg_file.write_text("language: de\n", encoding="utf-8")
+        with patch.object(config, "omarchy_default", return_value="claude"):
+            cfg = config.load_config()
+        self.assertEqual((cfg.runtime, cfg.model), ("codex", config.DEFAULT_MODEL))
+
+    def test_default_runtime_uses_template_sized_limits_even_if_sparse(self):
+        self.cfg_file.write_text("runtime: default\n", encoding="utf-8")
+        cfg = config.load_config()
+        self.assertEqual((cfg.runtime, cfg.model), ("codex", "gpt-6-astra"))
+        self.assertEqual((cfg.llm_timeout_seconds, cfg.max_input_chars_per_batch,
+                          cfg.max_total_input_chars_per_run, cfg.max_curated_context_chars,
+                          cfg.reasoning_effort), (1200, 100000, 250000, 200000, "medium"))
+
+    def test_default_agent_cannot_be_combined_with_fixed_model(self):
+        self.cfg_file.write_text("runtime: default\nmodel: gpt-local\n", encoding="utf-8")
+        cfg = config.load_config()
+        self.assertEqual(cfg.runtime, "unavailable")
+        self.assertIn("Modell", cfg.config_problems[0])
+        self.cfg_file.write_text("runtime: default\nmodel: null\nfallback_model: null\n", encoding="utf-8")
+        cfg = config.load_config()
+        self.assertEqual((cfg.runtime, cfg.model, cfg.fallback_model),
+                         ("codex", "gpt-6-astra", None))
+
+    def test_explicit_claude_without_fallback_keeps_legacy_default(self):
+        self.cfg_file.write_text("runtime: claude\nmodel: opus\n", encoding="utf-8")
+        cfg = config.load_config()
+        self.assertEqual(cfg.fallback_model, config.DEFAULT_FALLBACK_MODEL)
+
+    def test_invalid_health_agent_is_reported(self):
+        self.cfg_file.write_text("runtime: codex\nhealth_agent: [claude]\n", encoding="utf-8")
+        cfg = config.load_config()
+        self.assertIn("health_agent", cfg.config_problems[0])
+        self.cfg_file.write_text("runtime: codex\nhealth_agent: null\n", encoding="utf-8")
+        self.assertEqual(config.load_config().health_agent, "default")
 
 
 class TestTranslation(unittest.TestCase):

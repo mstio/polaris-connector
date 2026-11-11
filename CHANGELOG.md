@@ -6,6 +6,32 @@ Bridge, Curator, Installer und Werkzeuge. Hier stehen vor allem Dinge, die
 `install.sh` bzw. `polaris update` ungefragt mitändern oder die eine Nacharbeit
 verlangen. Einzelheiten stehen in der README.
 
+## Unveröffentlicht
+
+- **Signierte Updates** (nach dem Vorschlag eines Nutzers): `polaris update`
+  übernimmt einen neuen Stand nur, wenn dessen neuester Commit mit einem
+  Schlüssel aus `~/.config/polaris/allowed_signers` signiert ist; sonst bricht
+  es ab, auch mit `--yes`. `install.sh` legt diese Datei einmalig aus
+  `keys/allowed_signers` an und ersetzt sie nie. **Nacharbeit, einmal vor dem
+  Update:** Dieses Update übernimmt das alte `update.sh` noch ungeprüft. Den
+  Fingerabdruck über einen zweiten Kanal abgleichen und die Signatur von Hand
+  prüfen (`docs/install.md`, „Signed updates“, „Existing installs, once“), erst
+  dann `polaris update`. Ab dem nächsten Update prüft Polaris selbst.
+
+- Curator und Health Check folgen ohne ausdrückliche Vorgabe dem Omarchy-
+  Standardagenten. `runtime` in `curator.yaml` steuert nur den Curator;
+  `health_agent` überschreibt nur den Knopf „Agent fragen“. Vorhandene
+  `curator.yaml` bleibt unangetastet. Alte Konfigurationen ohne `runtime`
+  bleiben aus Datenschutzgründen bei Codex; `runtime: default` aktiviert die
+  dynamische Auswahl. Ein bewusster
+  Wechsel des Omarchy-Standardagenten kann den Anbieter für Curator-Daten und
+  Health-Check-Meldungen ändern. Die Curator-Pipeline unterstützt als
+  Omarchy-Standardagent derzeit Codex und Claude; andere Auswahl wird als
+  Fehler gemeldet. Für einen anderen Curator-Agenten gibt es `runtime: command`
+  mit eigener Anbindung. Wird Claude zum Standard, entfallen Bilder aus
+  Mail-Anhängen bei der Kuration; der Text bleibt. Kein zusätzlicher
+  Hintergrundprozess.
+
 ## 0.4.6 (2026-11-10)
 
 - **Erweiterung 0.4.6** (Auto-Update über `update_url`):

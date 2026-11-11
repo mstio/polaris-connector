@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from . import i18n
+from .default_agent import omarchy_default
 
 HOME = Path.home()
 GLOBAL_CONFIG_DIR = HOME / ".config" / "polaris"
@@ -31,13 +32,10 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_FALLBACK_MODEL = "gpt-5.6-sol"
 
 DEFAULTS: dict[str, Any] = {
-    "provider": "openai",
-    "runtime": "codex",
-    "model": DEFAULT_MODEL,
-    "fallback_model": DEFAULT_FALLBACK_MODEL,
+    "runtime": "default",
     "permit_more_expensive_fallback": False,
-    "llm_timeout_seconds": 180,
-    "reasoning_effort": None,
+    "llm_timeout_seconds": 1200,
+    "reasoning_effort": "medium",
     "batching": {
         "min_messages_for_early_run": 10,
         "min_chars_for_early_run": 8000,
@@ -46,11 +44,11 @@ DEFAULTS: dict[str, Any] = {
         "max_batches_per_run": 3,
         "max_llm_calls_per_run": 3,
         "max_messages_per_batch": 40,
-        "max_input_chars_per_batch": 50000,
-        "max_total_input_chars_per_run": 120000,
+        "max_input_chars_per_batch": 100000,
+        "max_total_input_chars_per_run": 250000,
     },
     "context": {
-        "max_curated_context_chars": 50000,
+        "max_curated_context_chars": 200000,
         # Bis zu dieser Groesse (ohne Herkunftskommentare) geht eine Datei
         # vollstaendig mit, darueber Verzeichnis + Volltext des Relevanten
         # (context.py, seit 2026-09-30). 0 = immer vollstaendig.
@@ -79,6 +77,7 @@ DEFAULTS: dict[str, Any] = {
 class CuratorConfig:
     provider: str = "openai"
     runtime: str = "codex"
+    health_agent: str = "default"
     model: str = DEFAULT_MODEL
     fallback_model: str | None = DEFAULT_FALLBACK_MODEL
     # Letzte Stufe, wenn Codex nicht erreichbar ist (Nutzungslimit, Ausfall):
@@ -165,6 +164,9 @@ class CuratorConfig:
             cfg.provider = override["provider"]
         if "runtime" in override:
             cfg.runtime = override["runtime"]
+        if "health_agent" in override:
+            value = override["health_agent"]
+            cfg.health_agent = "default" if value is None or value == "" else value
         if "model" in override:
             cfg.model = override["model"]
         if "fallback_model" in override:
@@ -291,7 +293,7 @@ def _parse_chat_sources(value: Any, lang: str = i18n.DEFAULT) -> tuple[tuple[str
 
 
 def _default_config() -> CuratorConfig:
-    return CuratorConfig()
+    return CuratorConfig(runtime="default")
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -344,7 +346,35 @@ def load_config(project_path: Path | None = None) -> CuratorConfig:
     an - nur die Schluessel aus PROJECT_OVERRIDE_KEYS; andere werden
     ignoriert und als Problem gemeldet (Health Check)."""
     ensure_global_config()
-    cfg = _default_config().merged_with(_read_yaml(GLOBAL_CONFIG_FILE))
+    global_options = _read_yaml(GLOBAL_CONFIG_FILE)
+    cfg = _default_config().merged_with(global_options)
+    # Before this setting existed, every file without runtime used Codex.
+    # Preserve that choice across updates. Newly written files contain an
+    # explicit `runtime: default` to follow Omarchy dynamically.
+    if "runtime" not in global_options:
+        cfg.runtime = "codex"
+    if cfg.runtime == "default":
+        cfg.runtime = omarchy_default() or "unavailable"
+        if global_options.get("model") or global_options.get("fallback_model"):
+            cfg.runtime = "unavailable"
+        for key, value in (("llm_timeout_seconds", 1200),
+                           ("max_input_chars_per_batch", 100000),
+                           ("max_total_input_chars_per_run", 250000),
+                           ("max_curated_context_chars", 200000)):
+            section = ("budget" if key in {"max_input_chars_per_batch", "max_total_input_chars_per_run"}
+                       else "context" if key == "max_curated_context_chars" else None)
+            options = global_options.get(section, {}) if section else global_options
+            if key not in (options or {}):
+                setattr(cfg, key, value)
+        if "reasoning_effort" not in global_options:
+            cfg.reasoning_effort = "medium"
+    if cfg.runtime == "claude":
+        if not global_options.get("model"):
+            cfg.model = "opus"
+        if "fallback_model" not in global_options and global_options.get("runtime") == "default":
+            cfg.fallback_model = "sonnet"
+    elif cfg.runtime == "codex" and not global_options.get("model") and global_options.get("runtime") == "default":
+        cfg.model = "gpt-6-astra"
     if project_path is not None:
         project_override = project_path / ".polaris" / "curator-config.yaml"
         raw = _read_yaml(project_override)
@@ -372,6 +402,12 @@ def load_config(project_path: Path | None = None) -> CuratorConfig:
                 i18n.resolve(cfg.language),
                 "{file}: nicht erlaubte Schluessel ignoriert ({keys}) - Laufzeit, Befehl und Modell nur in der lokalen curator.yaml",
                 file=f"{project_path.name}/.polaris/curator-config.yaml", keys=", ".join(refused)),)
+    if cfg.runtime == "unavailable":
+        cfg.config_problems += (i18n.t_lang(i18n.resolve(cfg.language),
+            "Omarchy-Standardagent fehlt, wird nicht unterstützt oder ist mit einem festen Modell kombiniert"),)
+    if not isinstance(cfg.health_agent, str) or cfg.health_agent not in {"default", "claude", "codex"}:
+        cfg.config_problems += (i18n.t_lang(i18n.resolve(cfg.language),
+            "curator.yaml: health_agent muss default, claude oder codex sein"),)
     return cfg
 
 
