@@ -18,7 +18,9 @@ Aufruf durch Claude Code mit JSON auf stdin:
                   * Aenderungen am Schutz selbst: ~/.claude/settings*,
                     ~/.claude/guard, claude-guard-*, ~/.config/polaris/config.yaml,
                     ~/.config/polaris/radar.yaml (Quittierungen),
-                    ~/.config/polaris/allowed_signers (Update-Anker) (immer),
+                    ~/.config/polaris/allowed_signers (Update-Anker), curator.yaml,
+                    projects.yaml, canary, Polaris-Units, POLARIS_NO_SANDBOX,
+                    ~/.config/omarchy/defaults/agent (immer),
                   * nach Fremdinhalt: Bash, Schreiben, MCP, WebFetch, WebSearch,
                     Monitor, Artifact, SendMessage - Stufe "streng"
 Stufe ueber CLAUDE_GUARD_LEVEL=standard|streng (Standard: streng).
@@ -58,8 +60,35 @@ ALWAYS_ASK_ACTIONS = re.compile(
 # Immer nachfragen: Aenderungen am Schutz selbst.
 # radar.yaml seit 2026-11-09: security.acknowledged blendet Sicherheitsbefunde aus.
 # allowed_signers seit 2026-11-11 (Fable): Vertrauensanker fuer polaris update.
+# Seit 2026-11-11 (Gremium Fable): auch was Modell, Projektzuordnung, Koeder,
+# Units (Umgebung, z. B. POLARIS_NO_SANDBOX) und Omarchys Standardagent bestimmt.
 PROTECTED = (".claude/settings", ".claude/guard", "claude-guard", ".config/polaris/config.yaml",
-             ".config/polaris/radar.yaml", ".config/polaris/allowed_signers")
+             ".config/polaris/radar.yaml", ".config/polaris/allowed_signers",
+             ".config/polaris/curator.yaml", ".config/polaris/projects.yaml", ".config/polaris/canary",
+             ".config/systemd/user/polaris-", ".config/omarchy/defaults/agent",
+             # 2. Runde Fable: Umgebung aller User-Units, Live-Code, Sandbox-Programm, Vermerk
+             ".config/environment.d", ".config/systemd/user/service.d", ".config/systemd/user.conf",
+             ".local/bin/bwrap", ".local/state/polaris/sandbox-last-run.json")
+# Live-Programmordner: Schreiben immer, Lesen nie nachfragen (Leitfaden schreibt Lesen vor).
+APP_DIR = ".local/share/polaris/app"
+POLARIS_SETTING_NAMES = ("radar.yaml", "config.yaml", "allowed_signers", "curator.yaml", "projects.yaml", "canary")
+UNIT_CHANGE = re.compile(
+    r"\bsystemctl\b.*\b(edit|set-environment|import-environment|unset-environment|revert|mask|disable|stop|kill)\b"
+    r".*polaris|\bsystemctl\b.*polaris.*\b(edit|revert|mask|disable|stop|kill)\b"
+    r"|\bsystemctl\b.*\b(set-environment|import-environment)\b", re.S)
+# POLARIS_NO_SANDBOX nur dort, wo es dauerhaft wirkt (Fable M7: grep im Repo
+# und Testaufrufe fragten sonst nach).
+NO_SANDBOX_PERSIST = re.compile(
+    r"POLARIS_NO_SANDBOX.*(systemctl|systemd-run|environment\.d|\.config/systemd|>|\btee\b|sed\s+-i"
+    r"|dbus-update-activation-environment|hyprctl)"
+    r"|(systemctl|systemd-run|environment\.d|\.config/systemd|\btee\b|sed\s+-i|dbus-update-activation-environment"
+    r"|hyprctl|echo|printf).*POLARIS_NO_SANDBOX", re.S)
+# Schreibende Befehle im Unit-Ordner auch ueber relative Pfade (cd ...).
+_WRITE = r"(\d?>(?!\s*/dev/null|&)|\btee\b|\bcp\b|\bmv\b|\bln\b|\brm\b|sed\s+-i|\binstall\b)"
+UNIT_DIR_WRITE = re.compile(r"\.config/systemd(/user)?\b.*" + _WRITE, re.S)
+APP_WRITE = re.compile(re.escape(APP_DIR) + r".*" + _WRITE + r"|" + _WRITE + r".*" + re.escape(APP_DIR), re.S)
+# Befehle, die Fremdtext ausgeben (Fable M6).
+FOREIGN_CMD = re.compile(r"(^|[;&|]\s*|\$\(\s*)(\S*/)?(polaris-radar|polaris-curator\s+quarantine)\b")
 DESTRUCTIVE = re.compile(r"\b(rm|mv|chmod|chattr|ln|truncate|rsync|find)\b")
 
 # Nach Fremdinhalt nachfragen (Stufe "streng"): alles, was Folgen haben oder ausleiten kann.
@@ -70,16 +99,31 @@ EVENT = None
 
 
 def _polaris_roots() -> list[str]:
+    cfg = HOME / ".config" / "polaris" / "config.yaml"
+    if not cfg.exists():
+        return []  # ohne Polaris nur die Standardordner
     try:
         import yaml  # Polaris setzt PyYAML voraus
-        raw = yaml.safe_load((HOME / ".config" / "polaris" / "config.yaml").read_text()) or {}
+        raw = yaml.safe_load(cfg.read_text()) or {}
         return [str(Path(str(r)).expanduser()) for r in raw.get("project_roots") or [] if r]
-    except Exception:  # noqa: BLE001 - ohne Polaris-Konfiguration nur die Standardordner
-        return []
+    except Exception:  # noqa: BLE001
+        # Seit 2026-11-11 (Fable): vorhanden, aber unlesbar -> geschlossen
+        # fehlschlagen: das ganze Home gilt als Fremdinhalt (laut, bis repariert).
+        return [str(HOME)]
+
+
+# Polaris' eigene Ablagen fuer Fremdtext (seit 2026-11-11, Gremium Fable);
+# nicht ~/.local/share/polaris/app (eigener Programmcode).
+POLARIS_FOREIGN = (".local/share/polaris/quarantine", ".local/share/polaris/processed",
+                   ".local/share/polaris/failed", ".local/share/polaris/conflicts",
+                   ".local/share/polaris/pending", ".local/share/polaris/expanded",
+                   ".config/ai-agents/handoff/omarchy-radar.md", ".local/state/polaris/radar.json",
+                   ".local/state/polaris/nvd.json", ".local/state/polaris/security.json",
+                   ".local/state/polaris/journals")
 
 
 def untrusted_paths() -> tuple[str, ...]:
-    paths = [str(HOME / "Downloads"), "/tmp", *_polaris_roots()]
+    paths = [str(HOME / "Downloads"), "/tmp", *_polaris_roots(), *(str(HOME / p) for p in POLARIS_FOREIGN)]
     paths += [str(Path(p).expanduser()) for p in os.environ.get("CLAUDE_GUARD_UNTRUSTED", "").split(":") if p]
     return tuple(p.rstrip("/") for p in paths if p.strip("/"))
 
@@ -102,7 +146,21 @@ def _under(path: str, paths) -> bool:
         real = os.path.realpath(os.path.expanduser(path))
     except Exception:  # noqa: BLE001
         real = path
-    return any(real == p or real.startswith(p + "/") or path.startswith(p) for p in paths)
+    return any(real == p or real.startswith(p + "/") or path == p or path.startswith(p + "/") for p in paths)
+
+
+def _ancestor_of_untrusted(path: str, paths) -> bool:
+    """Rekursives Durchsuchen eines Elternordners erreicht Fremdtext (Fable M6)."""
+    path = path.replace("${HOME}", str(HOME)).replace("$HOME", str(HOME)).split("*", 1)[0]
+    try:
+        real = os.path.realpath(os.path.expanduser(path)).rstrip("/")
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(real) and real != str(HOME) and real != "/" and any(
+        p == real or p.startswith(real + "/") for p in paths)
+
+
+RECURSIVE_CMD = re.compile(r"\bgrep\s+-\w*[rR]|\brg\b|\bfind\b|\bls\s+-\w*R|\*")
 
 
 def _session_file(data: dict) -> Path:
@@ -161,10 +219,14 @@ def _is_untrusted_read(data: dict) -> bool:
             return in_untrusted_cwd
         if not target.startswith(("/", "~", "$")) and in_untrusted_cwd:
             return True
-        return _under(target, paths) or _mentions(target, paths)
+        return (_under(target, paths) or _mentions(target, paths)
+                or (tool in ("Grep", "Glob") and _ancestor_of_untrusted(target, paths)))
     if tool == "Bash":
         cmd = str(ti.get("command") or "")
-        return in_untrusted_cwd or _mentions(cmd, paths) or bool(NET_CMD.search(cmd))
+        recursive_parent = bool(RECURSIVE_CMD.search(cmd)) and any(
+            _ancestor_of_untrusted(tok, paths) for tok in re.findall(r"(?:~|\$HOME|/)[^\s;|&'\"]*", cmd))
+        return (in_untrusted_cwd or _mentions(cmd, paths) or bool(NET_CMD.search(cmd))
+                or bool(FOREIGN_CMD.search(cmd)) or recursive_parent)
     return False
 
 
@@ -172,12 +234,17 @@ def _touches_protection(tool: str, ti: dict) -> bool:
     if tool in ("Write", "Edit", "NotebookEdit"):
         raw = str(ti.get("file_path") or ti.get("notebook_path") or "")
         target = os.path.realpath(os.path.expanduser(raw))
-        return any(p in target or p in raw for p in PROTECTED)
+        body = str(ti.get("content") or "") + str(ti.get("new_string") or "") + str(ti.get("new_source") or "")
+        startup = (bool(re.search(r"\.(conf|service|timer|env|sh|zsh|bash|profile|rc)$|/(env|\.?\w*rc)$", target))
+                   or "/.config/" in target)
+        return (any(p in target or p in raw for p in PROTECTED) or APP_DIR in target
+                or ("POLARIS_NO_SANDBOX" in body and startup))
     if tool in ("Bash", "Monitor"):
         cmd = str(ti.get("command") or "")
         return (any(p in cmd for p in PROTECTED) or (".claude" in cmd and "settings" in cmd)
-                or ("polaris" in cmd and ("radar.yaml" in cmd or "config.yaml" in cmd
-                                          or "allowed_signers" in cmd))
+                or (".config/polaris" in cmd and any(n in cmd for n in POLARIS_SETTING_NAMES))
+                or bool(UNIT_CHANGE.search(cmd)) or bool(NO_SANDBOX_PERSIST.search(cmd))
+                or bool(UNIT_DIR_WRITE.search(cmd)) or bool(APP_WRITE.search(cmd))
                 or (".claude" in cmd and bool(DESTRUCTIVE.search(cmd))))
     return False
 

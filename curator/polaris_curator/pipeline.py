@@ -544,8 +544,9 @@ def run_project(
                                                  lambda p, m, c, s: llm_mod._run_claude(p, m, c, s))
                 except Exception as exc:  # noqa: BLE001 - die Pruefung darf das Kuratieren nie aufhalten
                     findings = []
-                    for el in (change.get("knowledge_updates") or []) + (change.get("decisions_add") or []) + (
-                            change.get("open_loops_add") or []):
+                    for el in [*(change.get("knowledge_updates") or []), *(change.get("decisions_add") or []),
+                               *(change.get("open_loops_add") or []), *(change.get("decisions_update") or []),
+                               *(change.get("open_loops_close") or [])]:
                         el.pop("review_note", None)
                     if isinstance(exc, llm_mod.LlmUnavailableError):
                         review_off = True  # Limit/Ausfall: fuer den Rest des Laufs nicht erneut versuchen
@@ -651,7 +652,9 @@ def run_project(
             if findings:
                 summary = {}
                 for key, el, _t in review_mod._items(change, lambda _r: None):
-                    summary[key] = str(el.get("content") or el.get("decision") or el.get("text") or "")
+                    summary[key] = str(el.get("content") or el.get("decision") or el.get("text")
+                                       or " ".join(str(el.get(k) or "") for k in (
+                                           "decision_id", "new_status", "loop_id", "resolution_note")).strip())
                 try:
                     review_mod.record(project, item.label, reviewer, findings, summary)
                 except OSError as exc:

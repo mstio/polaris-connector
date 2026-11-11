@@ -93,5 +93,54 @@ class TestReview(unittest.TestCase):
             self.assertFalse(any("Geheim" in w for w in report.warnings))
 
 
+    def test_status_changes_and_closures_are_reviewed(self):
+        # Gremium 2026-11-11 (Codex, laterale Provokation): Statuswechsel einer
+        # Entscheidung und geschlossene offene Punkte gingen ungeprueft durch.
+        from conftest_helpers import FakeLlm, TempProject, fast_config, make_change
+        from polaris_curator import merge
+        tp = TempProject()
+        project = tp.__enter__()
+        self.addCleanup(tp.__exit__, None, None, None)
+        tp.write_message("msg-000000000001", content="Wir ueberlegen noch, ob die Umstellung kommt.")
+        w = []
+        layout.decisions_path(project).write_text(merge.apply_decisions(
+            "", [{"date": "2026-11-01", "title": "Umstellung auf System X", "decision": "Wir stellen um.",
+                  "rationale": "billiger", "decision_scope": "local", "source_message_ids": []}],
+            [], lambda *a: "", w, day="2026-11-01"))
+        layout.open_loops_path(project).write_text(merge.apply_open_loops(
+            "", [{"text": "Angebot fuer System X einholen", "loop_type": "data_need", "source_message_ids": []}],
+            [], lambda *a: "", w, day="2026-11-01"))
+        cfg = fast_config()
+        cfg.reviewer_model = "opus"
+        seen = {}
+        reply = {"findings": [
+            {"item": "[U1] Aenderung an Entscheidung D1", "verdict": "major", "issue_type": "overstated",
+             "explanation": "Quelle: noch offen."},
+            {"item": "C1 - L1", "verdict": "major", "issue_type": "not_supported", "explanation": "Kein Angebot erwaehnt."}]}
+
+        def fake_claude(prompt, m, c, schema=None):
+            seen["prompt"] = prompt
+            return llm.LlmResult(data=reply, model="claude:opus", tokens_used=1)
+
+        change = make_change(
+            decisions_update=[{"decision_id": "D1", "new_status": "Wirksam", "validated": True,
+                               "validation_note": "umgesetzt"}],
+            open_loops_close=[{"loop_id": "L1", "resolution_note": "Angebot liegt vor"}])
+        fake = FakeLlm([change])
+
+        def call(prompt, c, images=None, schema=None):
+            r = fake(prompt, c, images=images, schema=schema)
+            r.model = "gpt-x"
+            return r
+        with patch.object(llm, "_run_claude", side_effect=fake_claude):
+            pipeline.run_project(project, cfg, llm_fn=call)
+        self.assertIn("[U1]", seen["prompt"])
+        self.assertIn("Umstellung auf System X", seen["prompt"])   # alter Eintrag beim Pruefer
+        self.assertIn("[C1]", seen["prompt"])
+        self.assertIn("Angebot fuer System X einholen", seen["prompt"])
+        self.assertIn("Prüfhinweis", layout.decisions_path(project).read_text())
+        self.assertIn("Prüfhinweis: not_supported", layout.open_loops_path(project).read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

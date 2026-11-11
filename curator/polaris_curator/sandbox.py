@@ -39,8 +39,15 @@ _SYSTEM = [
 ]
 
 
+def bwrap_path() -> str | None:
+    """Fester Systempfad zuerst (seit 2026-11-11, Gremium Fable): ein Skript
+    namens bwrap in einem nutzerschreibbaren PATH-Ordner haette die Sandbox
+    sonst still ersetzt."""
+    return "/usr/bin/bwrap" if os.path.isfile("/usr/bin/bwrap") else shutil.which("bwrap")
+
+
 def _base(net: bool) -> list[str]:
-    argv = ["bwrap", "--die-with-parent", "--new-session", "--unshare-all"]
+    argv = [bwrap_path() or "bwrap", "--die-with-parent", "--new-session", "--unshare-all"]
     if net:
         # Namensaufloesung: /etc/resolv.conf zeigt auf systemd-resolved.
         argv += ["--share-net", "--ro-bind-try", "/run/systemd/resolve", "/run/systemd/resolve"]
@@ -50,13 +57,17 @@ def _base(net: bool) -> list[str]:
 @lru_cache(maxsize=1)
 def available() -> bool:
     """bwrap vorhanden und benutzbar (einmal je Prozess geprueft)."""
-    if os.environ.get("POLARIS_NO_SANDBOX") == "1" or not shutil.which("bwrap"):
+    if os.environ.get("POLARIS_NO_SANDBOX") == "1" or not bwrap_path():
         return False
     try:
         r = subprocess.run([*_base(False), "--", "/usr/bin/true"], capture_output=True, timeout=10)
+        # Wirkung pruefen, nicht nur Start (Fable 2026-11-11): in der leeren
+        # Sandbox darf das eigene Home nicht sichtbar sein.
+        hidden = subprocess.run([*_base(False), "--", "/usr/bin/test", "-e", str(Path.home())],
+                                capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return False
-    return r.returncode == 0
+    return r.returncode == 0 and hidden.returncode == 1
 
 
 def status() -> str | None:
@@ -65,7 +76,7 @@ def status() -> str | None:
         return None
     if os.environ.get("POLARIS_NO_SANDBOX") == "1":
         return "POLARIS_NO_SANDBOX=1 gesetzt"
-    if not shutil.which("bwrap"):
+    if not bwrap_path():
         return "bubblewrap (bwrap) fehlt"
     return "bubblewrap nicht nutzbar (unprivilegierte Namensräume gesperrt?)"
 
@@ -77,6 +88,82 @@ _ENV_ALLOW = ("LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "SSL_CERT_FILE", "SSL_
               "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
 
 
+def run_mode_path() -> Path:
+    return Path.home() / ".local" / "state" / "polaris" / "sandbox-last-run.json"
+
+
+def _now_utc():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+
+def record_run_mode(off: bool | None = None) -> bool:
+    """Haelt fest, ob Curator-Laeufe in der Sandbox liefen (seit 2026-11-11,
+    Gremium Fable): POLARIS_NO_SANDBOX=1 kann in der Umgebung des Timers
+    stehen, die der Health Check nicht sieht. `last_unsandboxed_at` bleibt
+    stehen, auch wenn spaeter wieder mit Sandbox gelaufen wird (sonst loeschte
+    ein Widget-Lauf den Vermerk). Nur Ja/Nein und Zeiten, keine Inhalte.
+    Liefert False, wenn der Vermerk nicht geschrieben werden konnte."""
+    import json
+    if os.environ.get("POLARIS_SANDBOX_RECORD_OFF"):  # Tests: nie ins echte Home
+        return True
+    if off is None:
+        off = os.environ.get("POLARIS_NO_SANDBOX") == "1"
+    path = run_mode_path()
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(old, dict):
+            old = {}
+    except (OSError, ValueError):
+        old = {}
+    now = _now_utc().isoformat(timespec="seconds")
+    rec = {"at": now, "sandbox": not off,
+           "last_unsandboxed_at": now if off else old.get("last_unsandboxed_at")}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(rec), encoding="utf-8")
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        try:
+            tmp.unlink()
+        except (OSError, UnboundLocalError):
+            pass
+        return False
+
+
+def last_run_without_sandbox(max_age_days: int = 7) -> str | None:
+    """Zeitpunkt des letzten Laufs ohne Sandbox, falls juenger als max_age_days.
+    Ob der juengste Lauf selbst ohne Sandbox war: latest_run_unsandboxed()."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    try:
+        rec = json.loads(run_mode_path().read_text(encoding="utf-8"))
+        raw = rec.get("last_unsandboxed_at") or (rec["at"] if rec.get("sandbox") is False else None)
+        if not raw:
+            return None
+        at = datetime.fromisoformat(str(raw))
+        if at.tzinfo is None:  # ohne Zeitzone: als UTC lesen (Fable 2026-11-11)
+            at = at.replace(tzinfo=timezone.utc)
+        if _now_utc() - at < timedelta(days=max_age_days):
+            return at.astimezone().strftime("%d.%m. %H:%M")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return None
+
+
+def latest_run_unsandboxed() -> bool:
+    import json
+    try:
+        return json.loads(run_mode_path().read_text(encoding="utf-8")).get("sandbox") is False
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+_RECORDED_OFF = False
+
+
 class SandboxUnavailable(RuntimeError):
     """bubblewrap fehlt oder ist nicht nutzbar, und POLARIS_NO_SANDBOX=1 ist
     nicht gesetzt: Fremdinhalt wird nicht ungeschuetzt verarbeitet."""
@@ -86,6 +173,11 @@ def enabled() -> bool:
     """True: in der Sandbox ausfuehren. False nur bei ausdruecklichem
     POLARIS_NO_SANDBOX=1. Sonst SandboxUnavailable (geschlossen fehlschlagen)."""
     if os.environ.get("POLARIS_NO_SANDBOX") == "1":
+        # Jeder Weg ohne Sandbox wird vermerkt, nicht nur `run`/`run-all`
+        # (Fable 2026-11-11: backfill, compact, review-loops, pdftotext ...).
+        global _RECORDED_OFF
+        if not _RECORDED_OFF:
+            _RECORDED_OFF = record_run_mode(off=True)
         return False
     if available():
         return True

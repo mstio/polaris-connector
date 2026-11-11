@@ -27,6 +27,7 @@ import os as _os  # noqa: E402
 _os.environ["POLARIS_NO_NOTIFY"] = "1"
 _os.environ["POLARIS_HEALTH_NO_CACHE"] = "1"  # Health-Zwischenspeicher (ADR 003) aus
 _os.environ["POLARIS_USAGE_OFF"] = "1"  # Nutzungszaehler (usage.py) nicht aus Tests fuellen
+_os.environ["POLARIS_SANDBOX_RECORD_OFF"] = "1"  # sandbox-last-run.json nicht im echten Home
 # Erwartete Texte sind deutsch, unabhaengig von `language` in der echten
 # curator.yaml (i18n.py; test_i18n setzt die Sprache gezielt um).
 _os.environ["POLARIS_LANG"] = "de"

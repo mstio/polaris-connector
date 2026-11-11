@@ -210,3 +210,27 @@ class TestCredentialSyncBack(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBwrapEffect(unittest.TestCase):
+    """Fable 2026-11-11 (H2): ein falsches bwrap, das nur ausfuehrt, galt als Sandbox."""
+
+    def test_fake_bwrap_is_not_available(self):
+        import tempfile, shutil as _sh
+        from polaris_curator import sandbox
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(_sh.rmtree, d, True)
+        fake = d / "bwrap"
+        fake.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done; shift; exec "$@"\n')
+        fake.chmod(0o755)
+        sandbox.available.cache_clear()
+        self.addCleanup(sandbox.available.cache_clear)
+        with patch.object(sandbox, "bwrap_path", return_value=str(fake)), \
+                patch.dict(os.environ, {"POLARIS_NO_SANDBOX": ""}):
+            self.assertFalse(sandbox.available())
+
+    def test_system_bwrap_preferred_over_path(self):
+        from polaris_curator import sandbox
+        with patch("os.path.isfile", side_effect=lambda p: p == "/usr/bin/bwrap"), \
+                patch("shutil.which", return_value="/home/u/.local/bin/bwrap"):
+            self.assertEqual(sandbox.bwrap_path(), "/usr/bin/bwrap")

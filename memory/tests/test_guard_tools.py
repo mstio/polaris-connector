@@ -116,6 +116,97 @@ class TestGuardHook(unittest.TestCase):
             self.assertEqual(self.hook("PreToolUse", tool, {}), "ask", tool)
         self.assertIsNone(self.hook("PreToolUse", "Read", {"file_path": "/x"}))
 
+    def test_polaris_own_foreign_text_taints(self):
+        # Gremium 2026-11-11 (Fable): Polaris' eigene Ablagen fuer Fremdtext
+        # (Quarantaene, abgelehnte/verarbeitete Chats, Radar) galten als sauber.
+        cases = [".local/share/polaris/quarantine/q.json", ".local/share/polaris/processed/a.json",
+                 ".local/share/polaris/failed/b.json", ".local/share/polaris/conflicts/c.json",
+                 ".config/ai-agents/handoff/omarchy-radar.md", ".local/state/polaris/radar.json"]
+        for i, rel in enumerate(cases):
+            sid = f"p{i}"
+            self.hook("PostToolUse", "Read", {"file_path": str(self.home / rel)}, sid=sid)
+            self.assertEqual(self.hook("PreToolUse", "Bash", {"command": "ls"}, sid=sid), "ask", rel)
+
+    def test_polaris_program_code_does_not_taint(self):
+        self.hook("PostToolUse", "Read", {"file_path": str(self.home / ".local/share/polaris/app/update.sh")})
+        self.assertIsNone(self.hook("PreToolUse", "Bash", {"command": "ls"}))
+
+    def test_unreadable_polaris_config_fails_closed(self):
+        # Fable 2026-11-11: kaputte config.yaml ergab still "keine Projektwurzeln".
+        (self.home / ".config" / "polaris" / "config.yaml").write_text("project_roots: [unbalanced\n")
+        self.hook("PostToolUse", "Read", {"file_path": str(self.home / "Irgendwo" / "kunde.md")})
+        self.assertEqual(self.hook("PreToolUse", "Bash", {"command": "ls"}), "ask")
+
+    def test_more_polaris_settings_are_protected(self):
+        for rel in (".config/polaris/curator.yaml", ".config/polaris/projects.yaml", ".config/polaris/canary",
+                    ".config/systemd/user/polaris-curator.service.d/x.conf", ".config/omarchy/defaults/agent"):
+            self.assertEqual(self.hook("PreToolUse", "Write", {"file_path": str(self.home / rel)}, level="standard"),
+                             "ask", rel)
+        self.assertEqual(self.hook("PreToolUse", "Bash", {"command": "cd ~/.config/polaris && sed -i s/a/b/ curator.yaml"},
+                                   level="standard"), "ask")
+        self.assertEqual(self.hook("PreToolUse", "Bash", {"command": "systemctl --user edit polaris-curator"},
+                                   level="standard"), "ask")
+
+    def test_unit_and_environment_gaps_found_by_fable(self):
+        # Gremium 2026-11-11 (Fable, 2. Runde, M5)
+        asks = [("Bash", {"command": "systemctl --user stop polaris-curator.timer"}),
+                ("Bash", {"command": "systemctl --user kill polaris-bridge.service"}),
+                ("Write", {"file_path": str(self.home / ".config/environment.d/x.conf"), "content": "A=1"}),
+                ("Write", {"file_path": str(self.home / ".config/systemd/user/service.d/x.conf"), "content": "A=1"}),
+                ("Write", {"file_path": "/irgendwo/x.conf", "content": "Environment=POLARIS_NO_SANDBOX=1"}),
+                ("Edit", {"file_path": "/irgendwo/x.conf", "new_string": "POLARIS_NO_SANDBOX=1"}),
+                ("Write", {"file_path": str(self.home / ".local/bin/bwrap"), "content": "x"}),
+                ("Write", {"file_path": str(self.home / ".local/share/polaris/app/curator/x.py"), "content": "x"}),
+                ("Bash", {"command": "rm ~/.local/state/polaris/sandbox-last-run.json"}),
+                ("Bash", {"command": "systemctl --user set-environment POLARIS_NO_SANDBOX=1"}),
+                ("Bash", {"command": "cd ~/.config/systemd/user && echo x > polaris-curator.service.d/x.conf"})]
+        for tool, ti in asks:
+            self.assertEqual(self.hook("PreToolUse", tool, ti, level="standard"), "ask", (tool, ti))
+
+    def test_round_two_findings(self):
+        # Fable 2026-11-11, 2. Nachpruefung (R1, R2, R4, R5, R6)
+        asks = ["echo 'export POLARIS_NO_SANDBOX=1' >> ~/.bashrc",
+                "dbus-update-activation-environment --systemd POLARIS_NO_SANDBOX=1",
+                "systemctl --user \\\nstop polaris-radar.timer",
+                "cd ~/.config/systemd/user && rm polaris-radar.timer",
+                "cp /x/y ~/.local/share/polaris/app/update.sh"]
+        for cmd in asks:
+            self.assertEqual(self.hook("PreToolUse", "Bash", {"command": cmd}, level="standard"), "ask", cmd)
+        quiet = ["cat ~/.local/share/polaris/app/docs/AGENTEN-LEITFADEN.md",
+                 "git -C ~/.local/share/polaris/app log -3",
+                 "ls ~/.config/systemd/user 2>/dev/null", "systemctl --user status polaris-radar.timer"]
+        for cmd in quiet:
+            self.assertIsNone(self.hook("PreToolUse", "Bash", {"command": cmd}, level="standard"), cmd)
+        self.assertIsNone(self.hook("PreToolUse", "Edit", {"file_path": "/repo/curator/polaris_curator/sandbox.py",
+                                                           "new_string": "POLARIS_NO_SANDBOX"}, level="standard"))
+        self.assertEqual(self.hook("PreToolUse", "Edit", {"file_path": str(self.home / ".bashrc"),
+                                                          "new_string": "export POLARIS_NO_SANDBOX=1"},
+                                   level="standard"), "ask")
+        self.hook("PostToolUse", "Bash", {"command": "grep -rn foo $HOME/.config/ai-agents/"}, sid="r6")
+        self.assertEqual(self.hook("PreToolUse", "Bash", {"command": "ls"}, sid="r6"), "ask")
+        self.hook("PostToolUse", "Bash", {"command": "grep -n polaris-radar README.md"}, sid="r2")
+        self.assertIsNone(self.hook("PreToolUse", "Bash", {"command": "ls"}, sid="r2"))
+
+    def test_fewer_false_alarms(self):
+        # Fable 2026-11-11 (M7): harmlose Befehle im Repo fragten nach.
+        repo = "/home/u/Projects/polaris-chatgpt-connector"
+        for cmd in ("grep -rn POLARIS_NO_SANDBOX curator/", "POLARIS_NO_SANDBOX=1 python3 -m unittest tests.test_e2e",
+                    f"cd {repo} && grep -n config.yaml README.md", f"grep -n canary {repo}/docs/x.md",
+                    "systemctl --user status polaris-curator.timer"):
+            self.assertIsNone(self.hook("PreToolUse", "Bash", {"command": cmd}, level="standard"), cmd)
+
+    def test_taint_via_parent_dirs_and_tools(self):
+        # Fable 2026-11-11 (M6)
+        cases = [("Bash", {"command": "grep -rn foo ~/.config/ai-agents/handoff/"}, None),
+                 ("Grep", {"pattern": "x", "path": str(self.home / ".local/share/polaris")}, None),
+                 ("Bash", {"command": "polaris-radar --show"}, None),
+                 ("Bash", {"command": "polaris-curator quarantine show 1"}, None),
+                 ("Read", {"file_path": str(self.home / ".local/state/polaris/journals/j.json")}, None)]
+        for i, (tool, ti, cwd) in enumerate(cases):
+            sid = f"m{i}"
+            self.hook("PostToolUse", tool, ti, sid=sid, cwd=cwd)
+            self.assertEqual(self.hook("PreToolUse", "Bash", {"command": "ls"}, sid=sid), "ask", (tool, ti))
+
     def test_read_outside_untrusted_does_not_taint(self):
         self.hook("PostToolUse", "Read", {"file_path": str(self.home / "eigenes" / "notiz.md")})
         self.assertIsNone(self.hook("PreToolUse", "Bash", {"command": "ls"}))

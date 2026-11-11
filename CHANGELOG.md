@@ -8,6 +8,40 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Vier stille Schutzlücken geschlossen** (Gremium 2026-11-11, Fable und
+  Codex mit Perspektivwechsel):
+  - Lief der Curator ohne Sandbox (z. B. `POLARIS_NO_SANDBOX=1` nur in der
+    Umgebung des Timers), ist die Health-Zeile Modell jetzt rot; vorher blieb
+    sie grün.
+  - Die Codex-Sandbox gibt nur noch den eigenen Programmordner frei; lag
+    `codex` in `~/.local/bin`, `~/.cargo/bin` oder `~/bin`, war bisher z. B.
+    ganz `~/.local` (mit allen erfassten Chats) lesbar. Hier (mise) unverändert.
+  - Der unabhängige Prüfer sieht jetzt auch Statuswechsel von Entscheidungen
+    und geschlossene offene Punkte; Einwände stehen als „Prüfhinweis“ daran.
+  - Guard-Hook: Polaris' eigene Fremdtext-Ablagen (Quarantäne, verarbeitete
+    und abgelehnte Chats, Radar) gelten als Fremdinhalt; Änderungen an
+    `curator.yaml`, `projects.yaml`, Köder, Polaris-Units,
+    `POLARIS_NO_SANDBOX` und Omarchys Standardagent fragen nach; eine
+    unlesbare `config.yaml` schlägt geschlossen fehl.
+  - Nachgebessert nach der Zweitmeinung (Fable): Der Vermerk „ohne Sandbox“
+    bleibt sieben Tage stehen, auch wenn danach mit Sandbox gelaufen wird,
+    und entsteht bei jedem Weg ohne Sandbox (auch `backfill`, `compact` …).
+    `bwrap` kommt fest aus `/usr/bin`, ein Wirkungstest prüft, dass das Home
+    in der Sandbox unsichtbar ist (ein falsches `bwrap` im PATH galt sonst als
+    Sandbox). Die Codex-Freigabe bleibt auch bei pnpm und bei einem Home hinter
+    einem Symlink eng. Der Guard-Hook fragt zusätzlich bei Änderungen an
+    `environment.d`, an Units (auch `stop`/`kill`), am Live-Programmordner und
+    an `bwrap` nach und wertet `polaris-radar`, die Quarantäne-Anzeige und
+    rekursives Durchsuchen von Elternordnern als Fremdinhalt; dafür weniger
+    Fehlalarme (z. B. `grep POLARIS_NO_SANDBOX` im Repo). Ein behobener Lauf
+    ohne Sandbox bleibt sieben Tage gelb sichtbar. Grenze: Der Guard-Hook ist
+    eine Textprüfung; Umwege über relative Pfade oder Skripte erkennt er nicht.
+  - Wer `codex` über pnpm installiert hat: Der Shim bekommt in der Sandbox
+    nur noch sich selbst und findet sein `node_modules` nicht; der Curator
+    scheitert dann laut. Abhilfe: `codex` über mise oder npm installieren.
+  Nacharbeit: aktiven Guard-Hook übernehmen
+  (`POLARIS_ADOPT_GUARD=1 ~/.local/share/polaris/app/install.sh --yes --only-existing`).
+
 - **Quick-Start mit Signaturprüfung** (`docs/install.md`): vor `./install.sh`
   Fingerabdruck und Signatur des Clones prüfen; Grenze der Erstinstallation
   (Vertrauen beim ersten Mal) beschrieben. Nur Doku, Nacharbeit: keine.

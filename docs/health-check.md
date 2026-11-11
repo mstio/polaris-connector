@@ -20,6 +20,11 @@ Hints on things that are easy to overlook (since 2026-11-05):
   The line then says "resolved"; the next snapshot (nightly) backs it up.
   A repository that went missing (moved or deleted): fix its path in
   `~/.config/omarchy-backup/paths.conf`.
+- **Curator without sandbox** (since 2026-11-11): every curator run notes
+  whether it ran in the sandbox (`~/.local/state/polaris/sandbox-last-run.json`,
+  only yes/no and time). If a run within the last 7 days ran without it, for
+  example because `POLARIS_NO_SANDBOX=1` sits in the timer's environment where
+  the health check cannot see it, the model line is red.
 - **Reboot:** the kernel was updated but the machine not restarted (the
   running kernel's modules are gone).
 - **Disk errors:** btrfs read, write and checksum error counters (sysfs, no

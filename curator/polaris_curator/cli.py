@@ -242,7 +242,8 @@ def _auto_compact(path, cfg, args) -> None:
 # Warnungen eines Laufs, die der Nutzer sehen muss (Benachrichtigung und
 # Health-Widget ueber curator-last-run.json); der Rest ist Protokoll.
 _IMPORTANT = ("scheitert wiederholt", "bleibt liegen", "nicht unterstuetzt", "gekuerzt kuratiert",
-              "nicht zugeordnet", "Kontextgrenze", "nicht kuratiert", "Prüfhinweis", "Prüfung ausgefallen")
+              "nicht zugeordnet", "Kontextgrenze", "nicht kuratiert", "Prüfhinweis", "Prüfung ausgefallen",
+              "Sandbox-Vermerk")
 
 
 def _important_warning(w: str) -> bool:
@@ -252,6 +253,11 @@ def _important_warning(w: str) -> bool:
 def _record(path, cfg, report) -> None:
     if report.aborted_reason == "bereits ein Lauf aktiv (Lock)":
         return  # der andere Lauf schreibt sein eigenes Ergebnis
+    from . import sandbox
+    # Health: Lauf ohne Sandbox sichtbar machen (2026-11-11); scheitert der
+    # Vermerk, laut im Laufergebnis (Fable: sonst stilles Gruen).
+    if not sandbox.record_run_mode():
+        report.warnings.append("Sandbox-Vermerk nicht geschrieben (~/.local/state/polaris/sandbox-last-run.json)")
     try:
         pipeline.record_last_run(path, cfg, report, _important_warning)
     except OSError as exc:

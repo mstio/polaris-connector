@@ -175,6 +175,24 @@ def _sync_back_codex_auth(private: Path, real: Path, before: bytes) -> None:
         logger.warning("Anmeldung konnte nicht zurueckgeschrieben werden: %s", real)
 
 
+
+def codex_sandbox_ro(codex_bin: Path) -> list[Path]:
+    """Was die Codex-Sandbox lesend sieht (seit 2026-11-11, Gremium Fable):
+    der Programmordner (z. B. mise-Installation .../codex/<Version>), aber nie
+    ein geteilter Ordner. Liegt der Ordner im Home, darueber, direkt darunter
+    (~/.local, ~/.cargo, ~/bin) oder ist er /usr bzw. /usr/local, nur die Datei
+    - sonst saehe eine eingeschleuste Anweisung z. B. ~/.local/share/polaris."""
+    home = Path.home().resolve()  # codex_bin ist aufgeloest (z. B. /home -> /var/home)
+    root = codex_bin.parent.parent
+    # Nie einen Vorfahren privater Polaris-/Konfigurationsdaten (Fable 2026-11-11:
+    # pnpm legt den Shim in ~/.local/share/pnpm -> root waere ~/.local/share).
+    private = (home / ".local" / "share" / "polaris", home / ".local" / "state", home / ".config")
+    shared = (root == home or root in home.parents or root.parent == home
+              or root in (Path("/usr"), Path("/usr/local"))
+              or any(root == d or root in d.parents for d in private))
+    return [codex_bin] if shared else [root]
+
+
 def _run_codex_exec(
     prompt: str,
     model: str,
@@ -253,7 +271,7 @@ def _run_codex_exec(
                 os.chmod(private_home / "auth.json", 0o600)
             else:
                 logger.warning("codex: %s fehlt - Aufruf in der Sandbox ohne Anmeldung", auth_src)
-            cmd = sandbox.wrap(cmd, ro=[codex_bin.parent.parent], rw=[tmp], net=True,
+            cmd = sandbox.wrap(cmd, ro=codex_sandbox_ro(codex_bin), rw=[tmp], net=True,
                                home=Path.home(), env={"CODEX_HOME": str(private_home)})
         try:
             result = subprocess.run(

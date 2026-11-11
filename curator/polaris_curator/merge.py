@@ -389,6 +389,8 @@ def apply_decisions(
             body = _replace_field_line(body, "Wirksamkeit geprüft", value)
         if item.get("note"):
             body = body.rstrip("\n") + f"\n\n**Notiz**\n{clean(item['note'])}\n"
+        if item.get("review_note"):  # Pruefer-Einwand gegen diese Aenderung (seit 2026-11-11)
+            body = body.rstrip("\n") + f"\n\n**Prüfhinweis (Aktualisierung {day})**\n{clean(item['review_note'])}\n"
         prov = _prov(provenance, item)
         # Auch Aktualisierungen tragen ihre Herkunft (sonst nicht ruecknehmbar).
         if prov.strip() not in body:
@@ -435,6 +437,8 @@ def apply_open_loops(
         moved = list(offen.pop(idx))
         note = f": {clean(item['resolution_note'])}" if item.get("resolution_note") else ""
         moved.append(f"  - erledigt am {day}{note}")
+        if item.get("review_note"):  # Pruefer-Einwand gegen das Schliessen (seit 2026-11-11)
+            moved.append(f"  - Prüfhinweis: {clean(item['review_note'])}")
         prov = _prov(provenance, item)
         if prov.strip() not in "\n".join(moved):
             moved.append(f"  {prov}")

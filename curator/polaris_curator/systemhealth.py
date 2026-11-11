@@ -533,6 +533,19 @@ def check_llm() -> dict:
                            fields=", ".join(str(f) for f in cs["refused"][:4])))
     except (OSError, ValueError, TypeError, AttributeError):
         pass
+    off_at = sandbox.last_run_without_sandbox()
+    if off_at and not sandbox.latest_run_unsandboxed():
+        # Fable 2026-11-11 (R3): behoben, aber nicht vergessen - gelb, 7 Tage.
+        notes.append(t("Lauf am {at} ohne Sandbox, seither wieder mit – Ursache prüfen "
+                       "(systemctl --user show-environment)", at=off_at))
+        off_at = None
+    if off_at:
+        # Gremium 2026-11-11 (Fable): der Lauf selbst zaehlt, nicht die
+        # Umgebung dieses Health Checks.
+        return _c("llm", label, "error",
+                  t("letzter Curator-Lauf ({at}) OHNE Sandbox – POLARIS_NO_SANDBOX=1 in der Umgebung "
+                    "des Timers? systemctl --user show polaris-curator -p Environment; systemctl --user show-environment",
+                    at=off_at))
     problem = sandbox.status()
     if problem and os.environ.get("POLARIS_NO_SANDBOX") != "1":
         # Seit 2026-11-07 fail-closed: ohne Sandbox laeuft keine Kuratierung.

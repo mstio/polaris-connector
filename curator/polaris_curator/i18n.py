@@ -198,6 +198,12 @@ EN: dict[str, str] = {
     'keiner offen; {n} verwaiste Zwischendatei(en), z. B. {item} – nach Prüfung löschen':
         'none open; {n} orphaned temporary file(s), e.g. {item} – delete after checking',
     'Sandbox nicht nutzbar – Kuratierung ausgesetzt: {problem}': 'sandbox unusable – curation paused: {problem}',
+    'Lauf am {at} ohne Sandbox, seither wieder mit – Ursache prüfen (systemctl --user show-environment)':
+        'run on {at} without sandbox, back with it since – check the cause (systemctl --user show-environment)',
+    'letzter Curator-Lauf ({at}) OHNE Sandbox – POLARIS_NO_SANDBOX=1 in der Umgebung des Timers? '
+    'systemctl --user show polaris-curator -p Environment; systemctl --user show-environment':
+        'last curator run ({at}) WITHOUT sandbox – POLARIS_NO_SANDBOX=1 in the timer environment? '
+        'systemctl --user show polaris-curator -p Environment; systemctl --user show-environment',
     'zuletzt geprüft {age} – polaris update --check': 'last checked {age} – polaris update --check',
     'Prüfung läuft bzw. nicht möglich (offline?) – polaris update --check':
         'check running or not possible (offline?) – polaris update --check',

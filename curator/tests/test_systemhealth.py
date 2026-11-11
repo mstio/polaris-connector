@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -614,6 +615,81 @@ class TestLlmCheck(unittest.TestCase):
                             fallback_model=None, sandbox_problem="bubblewrap (bwrap) fehlt")
         self.assertEqual(c["level"], "error")
         self.assertIn("bwrap", c["detail"])
+
+    def test_timer_run_without_sandbox_is_error(self):
+        # Gremium 2026-11-11 (Fable): POLARIS_NO_SANDBOX=1 nur in der Umgebung
+        # des Timers schaltete die Sandbox still ab; der Health Check sah nur
+        # seine eigene Umgebung und blieb gruen.
+        from polaris_curator import sandbox
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        with patch.object(Path, "home", return_value=home):
+            with patch.dict(os.environ, {"POLARIS_SANDBOX_RECORD_OFF": "", "POLARIS_NO_SANDBOX": "1"}):
+                sandbox.record_run_mode()           # so schreibt es der Curator-Lauf
+            with patch.dict(os.environ, {"POLARIS_NO_SANDBOX": ""}):
+                c = self._check(lambda b: "/x/claude" if b == "claude" else None, runtime="claude",
+                                model="opus", fallback_model=None)
+        self.assertEqual(c["level"], "error")
+        self.assertIn("OHNE Sandbox", c["detail"])
+
+    def test_timer_run_with_sandbox_stays_ok(self):
+        from polaris_curator import sandbox
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        with patch.object(Path, "home", return_value=home):
+            with patch.dict(os.environ, {"POLARIS_SANDBOX_RECORD_OFF": "", "POLARIS_NO_SANDBOX": ""}):
+                sandbox.record_run_mode()
+                c = self._check(lambda b: "/x/claude" if b == "claude" else None, runtime="claude",
+                                model="opus", fallback_model=None)
+        self.assertEqual(c["level"], "ok")
+
+    def _home(self):
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        return home
+
+    def test_unsandboxed_mark_survives_later_sandboxed_run(self):
+        # Fable 2026-11-11 (H1): ein Widget-Lauf mit Sandbox loeschte den Vermerk.
+        from polaris_curator import sandbox
+        with patch.object(Path, "home", return_value=self._home()):
+            with patch.dict(os.environ, {"POLARIS_SANDBOX_RECORD_OFF": "", "POLARIS_NO_SANDBOX": "1"}):
+                sandbox.record_run_mode()
+            with patch.dict(os.environ, {"POLARIS_SANDBOX_RECORD_OFF": "", "POLARIS_NO_SANDBOX": ""}):
+                sandbox.record_run_mode()
+                c = self._check(lambda b: "/x/claude" if b == "claude" else None, runtime="claude",
+                                model="opus", fallback_model=None)
+        # R3: behoben -> gelb mit eigenem Text, nicht still gruen
+        self.assertEqual(c["level"], "warn")
+        self.assertIn("seither wieder mit", c["detail"])
+
+    def test_naive_timestamp_does_not_crash(self):
+        # Fable 2026-11-11 (M3): Zeit ohne Zeitzone liess check_llm abstuerzen.
+        from polaris_curator import sandbox
+        home = self._home()
+        with patch.object(Path, "home", return_value=home):
+            f = sandbox.run_mode_path()
+            f.parent.mkdir(parents=True)
+            f.write_text('{"at": "2099-01-01T10:00:00", "sandbox": false}')
+            with patch.dict(os.environ, {"POLARIS_NO_SANDBOX": ""}):
+                c = self._check(lambda b: "/x/claude" if b == "claude" else None, runtime="claude",
+                                model="opus", fallback_model=None)
+        self.assertEqual(c["level"], "error")
+
+    def test_enabled_records_unsandboxed_use(self):
+        # Fable 2026-11-11 (M1): auch Wege an cli._record vorbei (backfill, compact ...).
+        from polaris_curator import sandbox
+        with patch.object(Path, "home", return_value=self._home()), \
+                patch.object(sandbox, "_RECORDED_OFF", False), \
+                patch.dict(os.environ, {"POLARIS_SANDBOX_RECORD_OFF": "", "POLARIS_NO_SANDBOX": "1"}):
+            self.assertFalse(sandbox.enabled())
+            self.assertIsNotNone(sandbox.last_run_without_sandbox())
+
+    def test_cli_record_writes_run_mode(self):
+        from polaris_curator import cli, pipeline, sandbox
+        with patch.object(sandbox, "record_run_mode", return_value=True) as rec, \
+                patch.object(pipeline, "record_last_run"):
+            cli._record(Path("/x"), None, pipeline.RunReport())
+        rec.assert_called_once()
 
     def test_main_cli_missing_is_error(self):
         c = self._check(lambda b: None, runtime="codex")
