@@ -5,6 +5,12 @@
 ```bash
 git clone https://github.com/mstio/polaris-connector ~/Projects/polaris-connector
 cd ~/Projects/polaris-connector
+# check the release signature before installing (see "Signed updates" below)
+awk '{print $3, $4}' keys/allowed_signers | ssh-keygen -lf -   # = release key fingerprint?
+git -c gpg.program=false -c gpg.openpgp.program=false -c gpg.x509.program=false \
+  -c gpg.minTrustLevel=fully -c gpg.ssh.program=ssh-keygen \
+  -c gpg.ssh.allowedSignersFile="$PWD/keys/allowed_signers" log -1 --format='%G? %GS'
+                                               # expected: G polaris-release
 ./install.sh                                   # guided: asks, shows a summary, confirms
 ./install.sh --dry-run --projects ~/Projekte   # no questions: only show what would happen
 ./install.sh --yes --projects ~/Projekte       # no questions: set up
@@ -100,6 +106,12 @@ state whose newest commit carries a valid SSH signature from a key in
 GitHub repository (a stolen token, a compromised account) would decide which
 code runs on every machine at the next update.
 
+- **New install:** `install.sh` trusts the key in the clone once (trust on
+  first use). The check in the quick start only helps if you compare the
+  fingerprint with one you got outside GitHub, for example from the
+  maintainer directly; the value below comes from the same repository and
+  would be swapped together with the key. Without such a second channel you
+  trust GitHub at install time, and from then on only the pinned key.
 - `install.sh` creates `~/.config/polaris/allowed_signers` once from
   `keys/allowed_signers` and never replaces it. The trust anchor is your copy,
   not the file in the repository, so a compromised repository cannot swap the

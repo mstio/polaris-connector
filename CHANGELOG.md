@@ -8,6 +8,10 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Quick-Start mit Signaturprüfung** (`docs/install.md`): vor `./install.sh`
+  Fingerabdruck und Signatur des Clones prüfen; Grenze der Erstinstallation
+  (Vertrauen beim ersten Mal) beschrieben. Nur Doku, Nacharbeit: keine.
+
 - **Signierte Updates** (nach dem Vorschlag eines Nutzers): `polaris update`
   übernimmt einen neuen Stand nur, wenn dessen neuester Commit mit einem
   Schlüssel aus `~/.config/polaris/allowed_signers` signiert ist; sonst bricht
