@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # Aktualisiert einen git-Checkout von Polaris (seit 2026-10-23), nach dem
 # Vorbild von `omarchy plugin update`:
 #
@@ -42,7 +42,17 @@ for arg in "$@"; do
 done
 
 fail() { echo "polaris update: $*" >&2; exit 2; }
-g() { git -C "$REPO" "$@"; }
+# bash (Shebang), git und ssh-keygen mit festem Pfad wie /usr/bin/bwrap in der
+# Sandbox (seit 2026-11-12, nach dem Vorschlag eines Nutzers): ein
+# untergeschobenes Programm weiter vorne im PATH (z. B. ~/.local/bin)
+# entschiede sonst ueber die Signaturpruefung. Fehlt eines, kein Update
+# (fail-closed); ssh-keygen wird erst vor der Pruefung verlangt, damit --check
+# ohne openssh weiterlaeuft. Zweitmeinung Fable 2026-11-12: auch Shebang und
+# install.sh (Fingerabdruck-Anzeige) festgelegt.
+GIT=/usr/bin/git
+SSH_KEYGEN=/usr/bin/ssh-keygen
+[ -x "$GIT" ] || fail "$GIT fehlt (Paket git) - kein Update."
+g() { "$GIT" -C "$REPO" "$@"; }
 # Version der Erweiterung plus Commit: zwischen zwei Erweiterungs-Releases
 # aendert sich sonst nur der Code, nicht die Nummer.
 version() {
@@ -69,16 +79,16 @@ extras_ok() {
 
 update_extras() {
   local ob="$HOME/.local/share/polaris/extras/omarchy-backup" id pd
-  if [ -d "$ob/.git" ] && ! timeout 60 git -C "$ob" fetch --quiet 2>/dev/null; then
+  if [ -d "$ob/.git" ] && ! timeout 60 "$GIT" -C "$ob" fetch --quiet 2>/dev/null; then
     echo "polaris update: omarchy-backup in $ob nicht abgefragt (Netz oder kein Upstream)" >&2
-  elif [ -d "$ob/.git" ] && [ -n "$(git -C "$ob" rev-list HEAD..@{u} 2>/dev/null)" ]; then
+  elif [ -d "$ob/.git" ] && [ -n "$("$GIT" -C "$ob" rev-list HEAD..@{u} 2>/dev/null)" ]; then
     echo "omarchy-backup: neue Commits"
-    git -C "$ob" log --oneline HEAD..@{u} | head -n 20
-    git -C "$ob" diff --stat HEAD @{u} | tail -n 15
+    "$GIT" -C "$ob" log --oneline HEAD..@{u} | head -n 20
+    "$GIT" -C "$ob" diff --stat HEAD @{u} | tail -n 15
     if ! extras_ok "omarchy-backup aktualisieren?"; then
       echo "omarchy-backup nicht aktualisiert - nach Durchsicht: POLARIS_UPDATE_EXTRAS=1 polaris update"
-    elif timeout 60 git -C "$ob" pull --ff-only --quiet 2>/dev/null; then
-      echo "omarchy-backup: $(git -C "$ob" log -1 --format='%h %s')"
+    elif timeout 60 "$GIT" -C "$ob" pull --ff-only --quiet 2>/dev/null; then
+      echo "omarchy-backup: $("$GIT" -C "$ob" log -1 --format='%h %s')"
     else
       echo "polaris update: omarchy-backup in $ob nicht aktualisiert (lokale Aenderungen oder Netz)" >&2
     fi
@@ -87,10 +97,10 @@ update_extras() {
   for id in mst.polaris-curator mst.agent-launchers mst.omarchy-backup; do
     pd="$HOME/.config/omarchy/plugins/$id"
     [ -d "$pd/.git" ] || continue
-    timeout 60 git -C "$pd" fetch --quiet 2>/dev/null || continue
-    [ -n "$(git -C "$pd" rev-list HEAD..@{u} 2>/dev/null)" ] || continue
+    timeout 60 "$GIT" -C "$pd" fetch --quiet 2>/dev/null || continue
+    [ -n "$("$GIT" -C "$pd" rev-list HEAD..@{u} 2>/dev/null)" ] || continue
     echo "Widget $id: neue Commits"
-    git -C "$pd" log --oneline HEAD..@{u} | head -n 20
+    "$GIT" -C "$pd" log --oneline HEAD..@{u} | head -n 20
     if ! extras_ok "Widget $id aktualisieren (omarchy plugin update)?"; then
       echo "Widget $id nicht aktualisiert - selbst: omarchy plugin update $id"
       continue
@@ -138,7 +148,7 @@ upstream="$(g rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" |
 upstream_ref="$(g rev-parse --symbolic-full-name '@{u}')" || fail "Upstream nicht aufloesbar"
 remote="$(g config "branch.$(g branch --show-current).remote" 2>/dev/null)" || remote="${upstream%%/*}"
 
-timeout 60 git -C "$REPO" fetch --quiet "$remote" || fail "git fetch fehlgeschlagen (Netz?)"
+timeout 60 "$GIT" -C "$REPO" fetch --quiet "$remote" || fail "git fetch fehlgeschlagen (Netz?)"
 # Ab hier nur noch $new: ein spaeterer Fetch (Health-Check, zweiter Aufruf,
 # Push im Entwicklungs-Checkout) verschiebt $upstream, aber nicht das, was
 # geprueft und gemergt wird (Fable 2026-11-11).
@@ -177,9 +187,10 @@ SIGNER_LINE='^polaris-release namespaces="git" ssh-ed25519 [A-Za-z0-9+/]+=*$'
   fail "Vertrauensanker $SIGNERS fehlt (oder ist leer bzw. ein Symlink) - kein Update ohne Signaturpruefung. Einmal '$REPO/install.sh --yes --only-existing' ausfuehren (legt ihn aus keys/allowed_signers des installierten Stands an), den Fingerabdruck pruefen (docs/install.md, \"Signed updates\"), dann erneut."
 ! grep -Evq "$SIGNER_LINE" "$SIGNERS" ||
   fail "Vertrauensanker $SIGNERS hat Zeilen ausserhalb des erwarteten Formats (polaris-release namespaces=\"git\" ssh-ed25519 ...) - NICHT aktualisiert. Datei pruefen."
+[ -x "$SSH_KEYGEN" ] || fail "$SSH_KEYGEN fehlt (Paket openssh) - kein Update ohne Signaturpruefung."
 sig() {
   g -c gpg.program=false -c gpg.openpgp.program=false -c gpg.x509.program=false \
-    -c gpg.minTrustLevel=fully -c gpg.ssh.program=ssh-keygen \
+    -c gpg.minTrustLevel=fully -c "gpg.ssh.program=$SSH_KEYGEN" \
     -c "gpg.ssh.allowedSignersFile=$SIGNERS" -c gpg.ssh.revocationFile=/dev/null "$@"
 }
 if ! sig verify-commit "$new" >/dev/null 2>&1 ||

@@ -519,8 +519,11 @@ SIGNERS_SRC="$REPO/keys/allowed_signers" SIGNERS="$POLARIS_CFG/allowed_signers"
 # ein ed25519-Schluessel fuer "polaris-release"; so zeigt der Fingerabdruck alles.
 SIGNER_LINE='^polaris-release namespaces="git" ssh-ed25519 [A-Za-z0-9+/]+=*$'
 signers_ok() { [ -s "$1" ] && ! grep -Evq "$SIGNER_LINE" "$1"; }
-signers_fp() { awk '{print $3, $4}' "$1" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}' | paste -sd' '; }
-command -v ssh-keygen >/dev/null || warn "ssh-keygen fehlt (openssh) - polaris update kann Signaturen nicht pruefen und bricht ab"
+# Fester Pfad wie in update.sh (Zweitmeinung Fable 2026-11-12): ein ssh-keygen
+# vorne im PATH koennte sonst den erwarteten Fingerabdruck vorspiegeln.
+SSH_KEYGEN=/usr/bin/ssh-keygen
+signers_fp() { awk '{print $3, $4}' "$1" | "$SSH_KEYGEN" -lf - 2>/dev/null | awk '{print $2}' | paste -sd' '; }
+[ -x "$SSH_KEYGEN" ] || warn "$SSH_KEYGEN fehlt (openssh) - polaris update kann Signaturen nicht pruefen und bricht ab"
 if ! signers_ok "$SIGNERS_SRC"; then
   warn "$SIGNERS_SRC fehlt oder hat ein unerwartetes Format - kein Anker angelegt; polaris update bricht ab"
 elif [ -L "$SIGNERS" ] || [ -L "$POLARIS_CFG" ]; then

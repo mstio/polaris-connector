@@ -221,6 +221,27 @@ class TestUpdateState(unittest.TestCase):
         self.assertFalse((self.work / "neu.txt").exists())
         self.assertIn("unbekannt", r.stderr)
 
+    def test_programs_in_path_cannot_replace_git_or_ssh_keygen(self):
+        # Nach dem Vorschlag eines Nutzers (2026-11-12): ein ssh-keygen, das
+        # jede Signatur gut nennt, und ein git, das mitschreibt, liegen vorne
+        # im PATH (wie in ~/.local/bin). Beide duerfen nicht laufen.
+        fake = self.tmp / "fakebin"
+        fake.mkdir()
+        mark = self.tmp / "fake-used.txt"
+        (fake / "ssh-keygen").write_text(
+            f"#!/bin/sh\necho ssh-keygen >> '{mark}'\ncase \"$*\" in *find-principals*) echo polaris-release ;; "
+            "*) echo 'Good \"git\" signature for polaris-release with ED25519 key SHA256:x' ;; esac\nexit 0\n")
+        (fake / "git").write_text(f"#!/bin/sh\necho git >> '{mark}'\nexec /usr/bin/git \"$@\"\n")
+        for p in fake.iterdir():
+            p.chmod(0o755)
+        self.extra_env = {"PATH": f"{fake}:{os.environ['PATH']}"}
+        self.replace_upstream_tip(keygen(self.tmp / "fremd"))
+        r = self.run_update(self.health_switch((), ()))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse((self.work / "neu.txt").exists())
+        self.assertIn("unbekannt", r.stderr)
+        self.assertFalse(mark.exists(), mark.read_text() if mark.exists() else "")
+
     def test_missing_trust_anchor_refuses(self):
         self.signers.unlink()
         r = self.run_update(self.health_switch((), ()))

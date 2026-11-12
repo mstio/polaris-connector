@@ -18,6 +18,7 @@ Dieser Leitfaden richtet sich an einen AI-Agenten (Claude Code, Codex, Gemini u.
 7. **Dokumentationspflicht.** Jede bleibende Änderung am Rechner im selben Arbeitsgang ins Maschinengedächtnis schreiben (Regeln in `~/.config/ai-agents/AGENTS.md`). Danach `python3 ~/.config/ai-agents/tools/memlint.py` ausführen, Exit 0 heißt in Ordnung.
 8. **Schutzdateien nur mit Zweitmeinung (seit 2026-11-07, ADR 003).** Die Liste steht in `AGENTS.md` im Repo (Sandbox, Ausgabeprüfung, Projekttrennung, Native Host, Privatsphäre-Prüfung, Guard-Hook, `update.sh`). Jede Änderung daran prüft vor dem Commit das stärkste verfügbare Modell unabhängig; das Ergebnis steht in der Commit-Nachricht. Wo im Code was zu ändern ist, zeigt dieselbe `AGENTS.md`.
 9. **Entscheidungen des Nutzers respektieren.** Baseline setzen, Daten löschen und Zugriffsrechte lockern entscheidet der Nutzer. Im Zweifel fragen statt raten.
+10. **Nicht unsicherer machen, nicht alles absichern (seit 2026-11-12).** Polaris darf den Rechner nicht angreifbarer machen, als er ohne Polaris wäre. Geschützt werden die Einfallstore, die Polaris selbst schafft: Updates aus dem Netz, automatische Verarbeitung fremder Inhalte durch KI, Veröffentlichung. Was der Nutzer bewusst einspielt oder wo er seine Daten ablegt, verantwortet er; Polaris macht es sichtbar, sichert es aber nicht gegen jede Manipulation ab. Wer schon im Home des Nutzers schreiben kann, liegt außerhalb. Befunde von Prüfgremien außerhalb dieses Rahmens als „bewusst außerhalb“ nennen, nicht umsetzen.
 
 ## Aufbau
 
