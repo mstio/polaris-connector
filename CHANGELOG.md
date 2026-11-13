@@ -8,6 +8,12 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Radar nach dem Aufwachen:** Der Timer holt den verpassten Tageslauf beim
+  Aufwachen sofort nach, bevor das Netz verbunden ist. Der Radar fand dann
+  keine Quelle (Exit 75) und schrieb tagelang nichts (Health gelb „zuletzt
+  geprüft vor 4 Tagen“). `polaris-radar.service` wartet jetzt wie der Curator
+  bis zu 2 Minuten auf das Netz (`nm-online`, nicht blockierend).
+  `polaris update` erneuert die Unit; nichts nachzuarbeiten.
 - **Vier stille Schutzlücken geschlossen** (Gremium 2026-11-11, Fable und
   Codex mit Perspektivwechsel):
   - Lief der Curator ohne Sandbox (z. B. `POLARIS_NO_SANDBOX=1` nur in der
