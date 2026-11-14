@@ -9,6 +9,7 @@ keywords:                # ganze Woerter, Gross-/Kleinschreibung egal
   - backup
 watch_issues: []         # z. B. owner/repo#12 (vorgemerkte Fehler)
 watch_repos: []          # z. B. owner/repo (neueste Release, letzter Push)
+own_repos: []            # eigene Repos: offene Issues/PRs anderer, neue mit Hinweis; owner/repo oder owner/*
 security:                # Sicherheitsabgleich (Arch Security Tracker, kernel.org, CISA KEV)
   enabled: true
   days: 30               # aktiv ausgenutzte Luecken (KEV) dieses Zeitraums

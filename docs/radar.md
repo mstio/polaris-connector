@@ -3,7 +3,10 @@
 `polaris-radar` collects what matters before you customise Omarchy: updates
 and local changes of installed git plugins, watched issues and repositories,
 Omarchy commits, releases and newly listed plugins matching your keywords,
-and Omarchy news. It writes `handoff/omarchy-radar.md` into the machine
+and Omarchy news. Optionally it lists open issues and pull requests that others
+opened in your own repositories (`own_repos`, e.g. `[you/*]`) and notifies you
+of new ones, so a contribution does not wait until someone happens to look. It
+writes `handoff/omarchy-radar.md` into the machine
 memory; all third-party text is defused and marked as data.
 
 The security section compares installed packages with the

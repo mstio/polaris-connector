@@ -7,6 +7,8 @@ und PyYAML) und schreibt eine kurze Uebersicht ins Maschinengedaechtnis
 
   - installierte git-Plugins: Upstream neuer? lokale Aenderungen?
   - beobachtete Issues/Repos aus der Konfiguration (z. B. vorgemerkte Plugins)
+  - eigene Repos (seit 2026-11-14): offene Issues und PRs anderer, neue mit
+    Desktop-Hinweis (own_repos; owner/* = alle oeffentlichen ausser Forks)
   - Omarchy-Commits und -Releases, die zu den Stichworten passen
   - neu gelistete Plugins im Omarchy-Plugin-Verzeichnis (Stichwort-Treffer)
   - Omarchy-News (RSS)
@@ -33,6 +35,7 @@ Konfiguration (optional): ~/.config/polaris/radar.yaml
   keywords: [dictation, alt+tab, calendar]   # zusaetzlich: Namen installierter Plugins
   watch_issues: [owner/repo#12]
   watch_repos: [owner/repo]
+  own_repos: [owner/*]                       # oder owner/repo; Eintraege des Kontos selbst zaehlen nicht
   days: 14
   security: {enabled: true, days: 30, kernel_lag_warn: 4, kev_aliases: {chromium v8: chromium},
              acknowledged: [{id: kev:CVE-…, subject: "openssh 10.6p1-2", until: 2026-12-09, reason: …}]}
@@ -79,10 +82,15 @@ NVD_MAX_FETCH = 5      # ohne API-Schluessel erlaubt die NVD 5 Abfragen je 30 s
 ACK_MAX_DAYS = 90      # Quittierungen gelten hoechstens so lange, dann neu bewerten
 MAX_PAGES = 4          # je Quelle hoechstens 400 Commits
 LIST_LIMIT = 15        # Eintraege je Abschnitt (Handoff-Richtgroesse)
+OWN_PER_REPO = 30      # offene Issues/PRs je eigenem Repo (neueste zuerst)
+OWN_MAX_REPOS = 20     # eigene Repos je Lauf (GitHub ohne Anmeldung: 60 Abfragen je Stunde)
+_REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
 class Unreachable(Exception):
-    pass
+    def __init__(self, msg: str, code: int | None = None):
+        super().__init__(msg)
+        self.code = code   # HTTP-Status, falls die Gegenstelle antwortete (403/429 = Rate-Limit)
 
 
 REACHED = []  # mindestens ein erfolgreicher Netzabruf?
@@ -95,6 +103,8 @@ def fetch(url: str, accept: str = "application/vnd.github+json") -> bytes:
             data = r.read()
             REACHED.append(url)
             return data
+    except urllib.error.HTTPError as e:
+        raise Unreachable(f"{url}: {e}", e.code) from e
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise Unreachable(f"{url}: {e}") from e
 
@@ -103,10 +113,17 @@ def gh(path: str):
     return json.loads(fetch(f"{API}/{path}"))
 
 
+# Steuer-, Nullbreite- und Bidi-Zeichen (koennen Zeilen und Links optisch taeuschen)
+_INVISIBLE_RE = re.compile("[\x00-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+
+
 def clean(text: str, limit: int = 120) -> str:
     """Fremdtext entschaerfen: eine Zeile, keine Kommentare/Backticks, gekuerzt, als Code."""
-    s = re.sub(r"\s+", " ", str(text or "")).strip()
-    s = s.replace("<!--", "").replace("-->", "").replace("`", "'")
+    s = _INVISIBLE_RE.sub("", re.sub(r"\s+", " ", str(text or ""))).strip()
+    # wiederholen: "<!-<!---" setzt sich nach einem Durchlauf neu zusammen (Fable 2026-11-14)
+    while "<!--" in s or "-->" in s:
+        s = s.replace("<!--", "").replace("-->", "")
+    s = s.replace("`", "'")
     if len(s) > limit:
         s = s[: limit - 1].rstrip() + "…"
     return f"`{s}`" if s else "`(leer)`"
@@ -240,6 +257,88 @@ def watch(cfg: dict) -> list[str]:
         tag = f"{rel[0]['tag_name']} ({rel[0]['published_at'][:10]})" if rel else "kein Release"
         lines.append(f"- {repo}: neuestes Release {clean(tag, 40)}, letzter Push {token(r['pushed_at'][:10])}")
     return lines
+
+
+def _repo_ok(name: str) -> bool:
+    return bool(_REPO_RE.fullmatch(name)) and not any(part in (".", "..") for part in name.split("/"))
+
+
+def own_repos(cfg: dict, seen: set, errors: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Offene Issues und PRs anderer in den eigenen Repos (seit 2026-11-14, nach
+    einem PR, der nur zufaellig auffiel). own_repos: owner/repo oder owner/* (alle
+    oeffentlichen, nicht archivierten Repos des Kontos ausser Forks). Eintraege
+    des Kontos selbst zaehlen nicht. Liefert (Zeilen: Summe, neue, bekannte;
+    IDs; neue Kurztexte). Titel und Namen sind Fremdtext. Fehler einzelner
+    Quellen landen in errors, Obergrenzen werden genannt, nie still.
+    Laeuft nach den Kernabschnitten; bei Rate-Limit (403/429) bricht es ab."""
+    specs = cfg.get("own_repos") or []
+    if isinstance(specs, str):
+        specs = [specs]
+    repos: list[str] = []
+    notes: list[str] = []
+    limited = False
+    for spec in specs if isinstance(specs, list) else []:
+        spec = str(spec)
+        m = re.fullmatch(r"([A-Za-z0-9_.-]+)/\*", spec)
+        if m and m[1] not in (".", ".."):
+            try:
+                listed = gh(f"users/{m[1]}/repos?type=owner&per_page=100")
+            except Unreachable as e:
+                errors.append(str(e))
+                notes.append(f"- {m[1]}/*: Liste nicht erreichbar")
+                limited = limited or e.code in (403, 429)
+                continue
+            for r in listed if isinstance(listed, list) else []:
+                name = str(r.get("full_name") or "")
+                if not r.get("fork") and not r.get("archived") and _repo_ok(name):
+                    repos.append(name)
+            if isinstance(listed, list) and len(listed) >= 100:
+                notes.append(f"- {m[1]}/*: mehr als 100 Repos, nur die ersten 100 berücksichtigt")
+        elif _repo_ok(spec):
+            repos.append(spec)
+    repos = list(dict.fromkeys(repos))
+    if len(repos) > OWN_MAX_REPOS:
+        notes.append(f"- {len(repos) - OWN_MAX_REPOS} weitere Repo(s) nicht geprüft (Obergrenze {OWN_MAX_REPOS})")
+        repos = repos[:OWN_MAX_REPOS]
+    fresh_lines, known_lines, ids, new = [], [], [], []
+    checked = 0
+    for n, repo in enumerate(repos):
+        if limited:
+            notes.append(f"- Rate-Limit: {len(repos) - n} Repo(s) nicht geprüft")
+            break
+        owner = repo.split("/")[0].lower()
+        try:   # ein Repo ohne Issues (z. B. Fork: 410) soll die anderen nicht verdecken
+            items = gh(f"repos/{repo}/issues?state=open&sort=created&direction=desc&per_page={OWN_PER_REPO}")
+        except Unreachable as e:
+            errors.append(str(e))
+            notes.append(f"- {repo}: nicht erreichbar")
+            limited = e.code in (403, 429)
+            continue
+        checked += 1
+        items = items if isinstance(items, list) else []
+        if len(items) >= OWN_PER_REPO:
+            notes.append(f"- {repo}: mindestens {OWN_PER_REPO} offene Einträge, nur die neuesten geprüft")
+        for i in items:
+            num, login = i.get("number"), str((i.get("user") or {}).get("login") or "")
+            if not isinstance(num, int) or login.lower() == owner:
+                continue
+            pr = bool(i.get("pull_request"))
+            kind, path = ("PR", "pull") if pr else ("Issue", "issues")
+            key = f"own:{repo}#{num}"
+            ids.append(key)
+            fresh = key not in seen
+            if fresh:
+                title = re.sub(r"\s+", " ", _INVISIBLE_RE.sub(" ", str(i.get("title") or ""))).strip()
+                new.append(f"{kind} {repo}#{num}: {title[:100]}")
+            (fresh_lines if fresh else known_lines).append(
+                f"- {'**neu** ' if fresh else ''}{kind} {repo}#{num} von {clean(login, 40)}, "
+                f"eröffnet {token(str(i.get('created_at') or '')[:10])}, "
+                f"zuletzt geändert {token(str(i.get('updated_at') or '')[:10])}: {clean(i.get('title'))} "
+                f"https://github.com/{repo}/{path}/{num}")
+    summary = (f"- {checked} von {len(repos)} eigenen Repo(s) geprüft, {len(ids)} offene Beiträge anderer, "
+               f"davon {len(new)} neu.")
+    # Summe und Hinweise zuerst, dann neue: section() kuerzt auf LIST_LIMIT Zeilen
+    return [summary, *notes, *fresh_lines, *known_lines], ids, new
 
 
 def installed_packages() -> dict[str, str]:
@@ -692,6 +791,19 @@ def main() -> int:
 
     attempt("plugins", lambda: check_plugins(plugins))
     attempt("watch", lambda: watch(cfg))
+    try:
+        seen = set(json.loads(STATE.read_text(encoding="utf-8")).get("seen", []))
+    except (OSError, ValueError, AttributeError):
+        seen = set()
+    own_ids: list[str] = []
+    own_new: list[str] = []
+
+    def own():
+        lines, ids, new_items = own_repos(cfg, seen, errors)
+        own_ids.extend(ids)
+        own_new.extend(new_items)
+        return lines
+
 
     def omarchy():
         branch = gh(f"repos/{OMARCHY}")["default_branch"]
@@ -720,6 +832,8 @@ def main() -> int:
     attempt("omarchy", omarchy)
     attempt("market", market)
     attempt("news", lambda: news(since_dt))
+    if cfg.get("own_repos"):   # nach den Kernabschnitten: teilt sich deren Rate-Limit
+        attempt("own", own)
 
     sec_cfg = cfg.get("security") if isinstance(cfg.get("security"), dict) else {}
     sec_finds: list[dict] | None = None
@@ -751,6 +865,9 @@ def main() -> int:
                   parts["plugins"] if parts["plugins"] is not None else [na], "keine git-Plugins")
         + "\n" + section("Beobachtet", "radar-watch", today, f"file:{CFG}",
                          parts["watch"] if parts["watch"] is not None else [na], "nichts eingetragen (watch_issues, watch_repos)")
+        + ("\n" + section("Eigene Repos: offene Issues und PRs anderer", "radar-own", today, f"file:{CFG}",
+                           parts["own"] if parts["own"] is not None else [na], "keine")
+           if "own" in parts else "")
         + "\n" + section("Omarchy: passend zu den Stichworten", "radar-omarchy", today,
                          f"url:https://github.com/{OMARCHY}/commits", parts["omarchy"] or [na], "keine")
         + "\n" + section("Neue Plugins im Verzeichnis", "radar-market", today,
@@ -780,30 +897,30 @@ def main() -> int:
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(target)
 
-    seen = set()
-    try:
-        seen = set(json.loads(STATE.read_text(encoding="utf-8")).get("seen", []))
-    except (OSError, ValueError):
-        pass
     new = [s for s in found if s not in seen]
     sec_new = [f for f in (sec_finds or []) if f["id"] not in seen]
     found += [f["id"] for f in sec_finds or []]
     STATE.parent.mkdir(parents=True, exist_ok=True)
     # Quittiertes vergessen: Kommt der Befund nach Ablauf oder Update zurueck, meldet er sich neu.
-    seen = (seen | set(found)) - {f["id"] for f in sec_acked}
+    seen = (seen | set(found) | set(own_ids)) - {f["id"] for f in sec_acked}
     STATE.write_text(json.dumps({"last_run": now.isoformat(), "seen": sorted(seen)[-2000:]}), encoding="utf-8")
 
-    if a.notify and sec_new and not os.environ.get("POLARIS_NO_NOTIFY"):
-        # notify-send deutet Pango-Markup: Fremdtext maskieren.
+    notify = a.notify and not os.environ.get("POLARIS_NO_NOTIFY")
+    # notify-send deutet Pango-Markup: Fremdtext maskieren.
+    if notify and sec_new:
         subprocess.run(["notify-send", "-a", "Polaris", "-u", "critical", "Sicherheit",
                         html.escape(f"{len(sec_new)} neue(r) Befund(e): {sec_new[0]['text'][:140]} – {target}",
                                     quote=False)],
                        check=False, timeout=10)
-    elif a.notify and new and not os.environ.get("POLARIS_NO_NOTIFY"):
+    elif notify and new:
         subprocess.run(["notify-send", "-a", "Polaris", "Omarchy-Radar",
                         f"{len(new)} neue Treffer – {target}"], check=False, timeout=10)
+    if notify and own_new:   # eigener Hinweis, auch neben einem Sicherheitsbefund
+        subprocess.run(["notify-send", "-a", "Polaris", "Eigene Repos",
+                        html.escape(f"{len(own_new)} neue(r) Beitrag/Beiträge: {own_new[0]} – {target}", quote=False)],
+                       check=False, timeout=10)
     if not a.quiet:
-        print(f"polaris-radar: {target} ({len(found)} Treffer, {len(new) + len(sec_new)} neu"
+        print(f"polaris-radar: {target} ({len(found)} Treffer, {len(new) + len(sec_new) + len(own_new)} neu"
               + (f", {len(errors)} Quelle(n) nicht erreichbar" if errors else "") + ")")
     return 0
 

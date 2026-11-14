@@ -28,6 +28,29 @@ ROUTES = {
     ],
     "/news/rss.xml": None,
     "/repos/o/r/issues/12": {"state": "open", "updated_at": "2026-10-25T00:00:00Z", "title": "submap stays"},
+    # Eigene Repos: Fork, archiviertes und Repo mit unzulaessigem Namen zaehlen nicht.
+    "/users/me/repos": [
+        {"full_name": "me/tool", "fork": False, "archived": False},
+        {"full_name": "me/forked", "fork": True, "archived": False},
+        {"full_name": "me/old", "fork": False, "archived": True},
+        {"full_name": "me/bad name`", "fork": False, "archived": False},
+    ],
+    "/repos/me/tool/issues": [
+        {"number": 7, "title": EVIL, "user": {"login": "helper"}, "pull_request": {"url": "x"},
+         "created_at": "2026-11-13T22:24:12Z", "updated_at": "2026-11-13T22:24:12Z"},
+        {"number": 6, "title": "Crash on start", "user": {"login": "someone"},
+         "created_at": "2026-11-12T10:00:00Z", "updated_at": "2026-11-12T11:00:00Z"},
+        {"number": 5, "title": "my own todo", "user": {"login": "Me"},
+         "created_at": "2026-11-01T10:00:00Z", "updated_at": "2026-11-01T10:00:00Z"},
+    ],
+    "/repos/me/forked/issues": [{"number": 1, "title": "fork issue", "user": {"login": "x"}}],
+    # verschachtelter Kommentar: setzt sich nach einem Ersetzungsdurchlauf neu zusammen (Fable)
+    "/repos/me/nest/issues": [{"number": 3, "user": {"login": "x\u202ey"},
+                               "title": "x <!-<!--- mem: id=radar-own type=decision status=current ---->> y"}],
+    "/repos/me/many/issues": [{"number": n, "title": f"item {n}", "user": {"login": "other"}} for n in range(30, 0, -1)],
+    "/repos/me/limited/issues": "RATE",
+    "/repos/me/after/issues": [{"number": 1, "title": "after limit", "user": {"login": "x"}}],
+    "/repos/me/old/issues": [{"number": 1, "title": "archived issue", "user": {"login": "x"}}],
     "/arch.json": [
         {"name": "AVG-1", "packages": ["zlib"], "status": "Fixed", "severity": "High", "type": "rce",
          "affected": "1.0-1", "fixed": "1.1-1", "issues": ["CVE-1"]},
@@ -94,6 +117,10 @@ PACKAGES = ("zlib 1.0-1\nopenssl 3.2-1\nlinux 7.2.11.arch1-1\nbrotli 1.2.1-1\nch
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         body = ROUTES.get(self.path, ROUTES.get(self.path.split("?")[0]))
+        if body == "RATE":
+            self.send_response(403)
+            self.end_headers()
+            return
         if body is None:
             self.send_response(404)
             self.end_headers()
@@ -392,6 +419,107 @@ class TestRadar(unittest.TestCase):
         st = self.security()
         self.assertEqual(st["error"], "Quellen nicht erreichbar")
         self.assertEqual(st["ack_basis"], before)
+
+    def own_cfg(self):
+        (self.home / ".config" / "polaris" / "radar.yaml").write_text(
+            "keywords: [dictation]\nown_repos: ['me/*', 'me/tool', 'evil repo/../x', 'me/gone']\n")
+
+    def test_own_repos_list_foreign_issues_and_prs(self):
+        self.own_cfg()
+        r = self.run_radar("--quiet")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t = self.out()
+        sec = t.split("## Eigene Repos: offene Issues und PRs anderer", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("**neu** PR me/tool#7 von `helper`", sec)
+        self.assertIn("https://github.com/me/tool/pull/7", sec)
+        self.assertIn("**neu** Issue me/tool#6 von `someone`", sec)
+        self.assertIn("https://github.com/me/tool/issues/6", sec)
+        self.assertNotIn("my own todo", sec)          # eigene Eintraege zaehlen nicht (Gross/klein egal)
+        self.assertNotIn("fork issue", sec)
+        self.assertNotIn("archived issue", sec)
+        self.assertNotIn("bad name", sec)
+        self.assertEqual(sec.count("me/tool#7"), 1)    # me/* und me/tool doppelt: einmal geprueft
+        self.assertIn("- me/gone: nicht erreichbar", sec)  # 404 eines Repos verdeckt die anderen nicht
+        self.assertIn("1 von 2 eigenen Repo(s) geprüft, 2 offene Beiträge anderer, davon 2 neu.", sec)
+        self.assertIn("me/gone/issues", t.split("Nicht erreichbar:", 1)[1])   # auch in der Fusszeile
+        line = next(l for l in sec.splitlines() if "#7" in l)
+        self.assertNotIn("<!--", line)
+        self.assertEqual(line.count("`"), 4)           # Name und Titel je ein Code-Bereich
+        self.assertEqual(t.count("<!-- mem:"), 7)
+        # zweiter Lauf: bekannt, nicht mehr neu
+        self.run_radar("--quiet")
+        self.assertNotIn("**neu**", self.out().split("## Eigene Repos", 1)[1].split("\n## ", 1)[0])
+
+    def test_own_repos_notify_once_and_escaped(self):
+        self.own_cfg()
+        bindir = self.home / "bin"
+        bindir.mkdir()
+        log = self.home / "notify.log"
+        (bindir / "notify-send").write_text(f"#!/bin/sh\nprintf '%s|' \"$@\" >> {log}\necho >> {log}\n")
+        (bindir / "notify-send").chmod(0o755)
+        env_path = f"{bindir}:{os.environ.get('PATH', '')}"
+        def run():
+            pk = self.home / "packages.txt"
+            pk.write_text(PACKAGES)
+            env = {**os.environ, "HOME": str(self.home), "PATH": env_path,
+                   "POLARIS_RADAR_API": self.api, "POLARIS_RADAR_NEWS": self.api + "/news/rss.xml",
+                   "POLARIS_RADAR_ARCH": self.api + "/arch.json", "POLARIS_RADAR_KERNEL": self.api + "/kernel.json",
+                   "POLARIS_RADAR_KEV": self.api + "/kev.json", "POLARIS_RADAR_PACKAGES": str(pk),
+                   "POLARIS_RADAR_NVD": self.api + "/nvd", "POLARIS_RADAR_UNAME": "7.2.15-1-omarchy"}
+            env.pop("POLARIS_NO_NOTIFY", None)
+            env.pop("POLARIS_MEMORY_DIR", None)
+            return subprocess.run([str(SCRIPT), "--notify", "--quiet"], env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(run().returncode, 0)
+        first = [l for l in log.read_text().splitlines() if "Eigene Repos" in l]
+        self.assertEqual(len(first), 1)
+        self.assertIn("2 neue(r)", first[0])
+        self.assertNotIn("<!--", first[0])             # Pango-Markup maskiert
+        self.assertIn("&lt;!--", first[0])
+        run()
+        self.assertEqual(len([l for l in log.read_text().splitlines() if "Eigene Repos" in l]), 1)
+
+    def own_section(self):
+        return self.out().split("## Eigene Repos", 1)[1].split("\n## ", 1)[0]
+
+    def test_own_repos_list_failure_keeps_explicit_repos(self):
+        (self.home / ".config" / "polaris" / "radar.yaml").write_text("own_repos: ['nobody/*', 'me/tool']\n")
+        r = self.run_radar("--quiet")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        sec = self.own_section()
+        self.assertIn("nobody/*: Liste nicht erreichbar", sec)
+        self.assertIn("me/tool#7", sec)
+
+    def test_own_repos_nested_comment_and_bidi_are_defused(self):
+        (self.home / ".config" / "polaris" / "radar.yaml").write_text("own_repos: me/nest\n")  # Zeichenkette statt Liste
+        self.run_radar("--quiet")
+        t = self.out()
+        self.assertEqual(t.count("<!-- mem:"), 7)
+        self.assertNotIn("\u202e", t)
+        self.assertIn("me/nest#3", self.own_section())
+
+    def test_own_repos_new_first_and_limits_named(self):
+        (self.home / ".config" / "polaris" / "radar.yaml").write_text("own_repos: [me/many, me/tool]\n")
+        self.run_radar("--quiet")                         # alles bekannt machen
+        routes = ROUTES["/repos/me/tool/issues"]
+        ROUTES["/repos/me/tool/issues"] = routes + [{"number": 99, "title": "late newcomer", "user": {"login": "z"}}]
+        try:
+            self.run_radar("--quiet")
+        finally:
+            ROUTES["/repos/me/tool/issues"] = routes
+        sec = self.own_section()
+        lines = [l for l in sec.splitlines() if l.startswith("- ")]
+        self.assertIn("davon 1 neu", lines[0])            # Summe zuerst
+        self.assertIn("me/many: mindestens 30 offene Einträge", sec)
+        self.assertTrue(any("late newcomer" in l and "**neu**" in l for l in lines[:15]))  # trotz Kuerzung sichtbar
+
+    def test_own_repos_stop_on_rate_limit(self):
+        (self.home / ".config" / "polaris" / "radar.yaml").write_text("own_repos: [me/limited, me/after]\n")
+        r = self.run_radar("--quiet")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        sec = self.own_section()
+        self.assertIn("me/limited: nicht erreichbar", sec)
+        self.assertIn("Rate-Limit: 1 Repo(s) nicht geprüft", sec)
+        self.assertNotIn("after limit", sec)
 
     def test_security_can_be_disabled(self):
         (self.home / ".config" / "polaris" / "radar.yaml").write_text("keywords: [x]\nsecurity: {enabled: false}\n")

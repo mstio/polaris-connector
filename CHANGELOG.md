@@ -8,6 +8,18 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Radar: Beiträge in eigenen Repos** (2026-11-14): Mit `own_repos`
+  (`owner/repo` oder `owner/*` für alle öffentlichen Repos eines Kontos außer
+  Forks) listet der Radar offene Issues und PRs anderer im neuen Abschnitt
+  „Eigene Repos“ und meldet neue per Desktop-Hinweis. Anlass: ein PR, der nur
+  durch Nachfragen auffiel. Titel und Namen sind Fremdtext (entschärft, Links
+  selbst gebaut). Je Repo eine Abfrage im bestehenden Tageslauf nach den
+  übrigen Abschnitten, bei Rate-Limit Abbruch mit Hinweis; Obergrenzen (20
+  Repos, 30 Einträge je Repo) werden genannt. Ohne `own_repos` ändert sich
+  nichts. Dabei gehärtet (Fable): Die Entschärfung von Fremdtext entfernt
+  verschachtelte HTML-Kommentare jetzt vollständig (vorher ergab
+  `<!-<!---` wieder `<!--`, ein Fremder hätte so ein mem-Tag einschleusen
+  können) und streicht Steuer-, Nullbreite- und Bidi-Zeichen.
 - **Widget 0.3.5, Beschreibung und Autor** (2026-11-14): Autor und Copyright
   `mstio` statt Klarname (Widget-Manifest, beide `LICENSE`). Manifest, README
   und Widget-README stellen den Nutzen voran: eine belegte Erinnerung an das,
