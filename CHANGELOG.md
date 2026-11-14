@@ -8,6 +8,21 @@ verlangen. Einzelheiten stehen in der README.
 
 ## Unveröffentlicht
 
+- **Widget 0.3.5, Beschreibung und Autor** (2026-11-14): Autor und Copyright
+  `mstio` statt Klarname (Widget-Manifest, beide `LICENSE`). Manifest, README
+  und Widget-README stellen den Nutzen voran: eine belegte Erinnerung an das,
+  was man mit KI erarbeitet hat, die einem selbst gehört (Fakten getrennt von
+  Aussagen und Vermutungen, Markdown für jeden Agenten), statt „project
+  memory“. `memory/README.md`: Radar-Timer läuft auch bei gesperrtem
+  Bildschirm und wartet nach dem Aufwachen auf das Netz (Doku war veraltet,
+  Befund der Fable-Prüfung zu PR #4).
+- **Radar nach dem Aufwachen** (2026-11-13, Beitrag von bernhard2804, PR #4):
+  Der Timer holt den verpassten Tageslauf beim Aufwachen sofort nach, bevor
+  das Netz verbunden ist. Der Radar fand dann
+  keine Quelle (Exit 75) und schrieb tagelang nichts (Health gelb „zuletzt
+  geprüft vor 4 Tagen“). `polaris-radar.service` wartet jetzt wie der Curator
+  bis zu 2 Minuten auf das Netz (`nm-online`, nicht blockierend).
+  `polaris update` erneuert die Unit; nichts nachzuarbeiten.
 - **Vier stille Schutzlücken geschlossen** (Gremium 2026-11-11, Fable und
   Codex mit Perspektivwechsel):
   - Lief der Curator ohne Sandbox (z. B. `POLARIS_NO_SANDBOX=1` nur in der

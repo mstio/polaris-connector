@@ -5,9 +5,14 @@ Description=Polaris: Omarchy-Radar und Sicherheitsabgleich (handoff/omarchy-rada
 # Bewusst ohne ExecCondition=polaris-awake (bis 08.11.2026): der Radar
 # liest kein Cloud-Laufwerk, und der naechtliche Tageslauf wurde bei
 # gesperrtem Bildschirm jedes Mal uebersprungen (tests/test_units.py).
+# Persistent=true holt den Tageslauf beim Aufwachen in derselben Sekunde
+# nach, vor dem Netz (Exit 75 am 11.-13.11.2026, vier Tage nichts geschrieben).
+# Deshalb wie beim Curator bis zu 2 Minuten auf das Netz warten; bewusst
+# nicht blockierend ("-"): ohne Netz endet der Lauf wie bisher mit Exit 75.
 
 [Service]
 Type=oneshot
+ExecStartPre=-/usr/bin/nm-online -q -t 120
 ExecStart=%h/.local/bin/polaris-radar --notify --quiet
 SuccessExitStatus=75
 Nice=10

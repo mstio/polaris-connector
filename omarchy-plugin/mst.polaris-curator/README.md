@@ -2,11 +2,12 @@
 
 ![Polaris widget with the health check](preview.png)
 
-The bar widget for [Polaris](https://github.com/mstio/polaris-connector), a
-project memory for [Omarchy](https://omarchy.org): your ChatGPT and Claude
-project chats, meeting transcripts, mails and documents become three short,
-sourced files per project – what is known, what was decided, what is still
-open.
+The bar widget for [Polaris](https://github.com/mstio/polaris-connector) on
+[Omarchy](https://omarchy.org), so you never lose what you worked out with AI:
+your ChatGPT and Claude project chats, meeting transcripts, mails and
+documents become three short files per project that you own – what is known,
+what was decided, what is still open. Every entry is sourced, facts are kept
+apart from claims and guesses, and it is plain Markdown any agent can read.
 
 The widget shows:
 

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "mst.polaris-curator",
   "name": "Polaris",
-  "version": "0.3.4",
-  "author": "Matthias Stache",
+  "version": "0.3.5",
+  "author": "mstio",
   "license": "MIT",
-  "description": "Bar widget for Polaris, a project memory for AI chats, meetings, mails and documents: shows new material per project, starts curation with your own AI CLI, opens the knowledge files, and a health check for capture, curation, backup, machine memory and security. Requires Polaris.",
+  "description": "Never lose what you worked out with AI. Polaris turns your ChatGPT and Claude chats, meetings, mails and documents into a short memory you own: what is known, what was decided, what is still open. Every entry is sourced, facts are kept apart from claims and guesses, and it's plain Markdown any agent can read. This widget shows what's new and starts curation. Requires Polaris.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Polaris",
-    "description": "Polaris project memory: pending sources, curation runs and health check",
+    "description": "Polaris: what's new, curation runs and health check",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "center"

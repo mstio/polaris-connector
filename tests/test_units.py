@@ -30,6 +30,18 @@ class TestAwakeGatedUnits(unittest.TestCase):
         # der Radar liest nur lokale Dateien und das Netz.
         self.assertNotRegex((UNITS / "polaris-radar.service").read_text(), GATE)
 
+    def test_network_units_wait_for_network_after_resume(self):
+        # Persistent=true holt einen verpassten Tageslauf beim Aufwachen in
+        # derselben Sekunde nach, vor dem Netz: der Radar endete so am 11.,
+        # 12. und 13.11.2026 jeweils mit Exit 75 und schrieb vier Tage nichts
+        # (Health gelb "zuletzt geprueft vor 4 Tagen"). Wie beim Curator kurz
+        # auf das Netz warten, nicht blockierend ("-"): ohne Netz oder ohne
+        # NetworkManager laeuft die Unit wie bisher weiter.
+        wait = re.compile(r"^ExecStartPre=-/usr/bin/nm-online -q -t \d+$", re.M)
+        for unit in (UNITS / "polaris-radar.service",
+                     UNITS.parent / "curator" / "systemd" / "polaris-curator.service"):
+            self.assertRegex(unit.read_text(), wait, unit.name)
+
 
 if __name__ == "__main__":
     unittest.main()

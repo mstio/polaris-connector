@@ -2,9 +2,10 @@
 
 # Polaris
 
-### *Your AI project memory for [Omarchy](https://omarchy.org)*
+### *Never lose what you worked out with AI*
 
-Chats, meetings, mails and documents in. A sourced memory per project out.
+Chats, meetings, mails and documents in. A sourced memory you own out.
+For [Omarchy](https://omarchy.org).
 
 <p>
   <a href="#install"><b>Install</b></a> •
@@ -16,13 +17,19 @@ Chats, meetings, mails and documents in. A sourced memory per project out.
 
 </div>
 
-You work on projects with ChatGPT and Claude, and the decisions, facts and
-open questions end up scattered across dozens of chats, documents and mails.
-Polaris collects them per project while you work and has the coding agent you
-already use write a short, sourced memory for each project: **what is known,
-what was decided, what is still open.** It lives as plain Markdown in your own
-project folders, readable by you, your editor and every AI agent on your
-machine.
+What you work out with ChatGPT and Claude, the decisions, facts and open
+questions, ends up scattered across dozens of chats, documents and mails,
+locked into one provider and unknown to the next chat. Polaris collects it
+while you work and has the coding agent you already use write a short memory
+for each project: **what is known, what was decided, what is still open.**
+
+Unlike the built-in memory of an AI assistant, you can check it and keep it:
+
+- **Sourced:** every entry links to the chat message, mail or file it came from.
+- **Honest:** facts are kept apart from stakeholder claims and hypotheses,
+  each with a confidence.
+- **Yours:** plain Markdown in your own project folders, readable by you, your
+  editor and every AI agent on your machine. Switching providers loses nothing.
 
 ![Polaris in one picture: ChatGPT and Claude project chats, meeting transcripts, mails, Excel and PDF files flow into polaris-curator, which writes knowledge.md, decisions.md and open-loops.md; entries are tagged as fact, stakeholder statement or hypothesis, with confidence, a stable ID and a link to the source file, mail or chat](docs/screenshots/hero.png)
 
